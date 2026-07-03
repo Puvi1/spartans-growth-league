@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import XPBar from "@/components/XPBar";
@@ -10,10 +11,13 @@ import { fireBigConfetti } from "@/lib/confetti";
 
 export default function Profile() {
     const { user, refreshUser } = useAuth();
+    const location = useLocation();
+    const isFirstTime = location.state?.first_time;
     const [badges, setBadges] = useState([]);
     const [stats, setStats] = useState(null);
     const [completion, setCompletion] = useState(null);
-    const [editing, setEditing] = useState(false);
+    const [editing, setEditing] = useState(!!isFirstTime);
+    const [availableTeams, setAvailableTeams] = useState([]);
     const [form, setForm] = useState({ phone: "", bio: "", avatar_url: "" });
 
     const loadCompletion = async () => {
@@ -24,6 +28,7 @@ export default function Profile() {
     useEffect(() => {
         api.get("/badges").then((r) => setBadges(r.data));
         api.get("/dashboard/stats").then((r) => setStats(r.data));
+        api.get("/teams/public").then((r) => setAvailableTeams(r.data)).catch(() => {});
         loadCompletion();
     }, []);
 
@@ -34,6 +39,7 @@ export default function Profile() {
                 phone: user.phone || "",
                 bio: user.bio || "",
                 avatar_url: user.avatar_url || "",
+                team_id: user.team_id || "",
                 dob: user.dob || "",
                 gender: user.gender || "",
                 marital_status: user.marital_status || "",
@@ -57,9 +63,13 @@ export default function Profile() {
             // Strip empty strings to null so backend sees them as intentional
             const payload = {};
             Object.entries(form).forEach(([k, v]) => {
-                if (v !== "" && v !== null && v !== undefined) payload[k] = v;
+                if (v !== "" && v !== null && v !== undefined && k !== "team_id") payload[k] = v;
             });
             const { data } = await api.patch("/profile", payload);
+            // Team change (separate endpoint)
+            if (form.team_id && form.team_id !== user.team_id) {
+                await api.post(`/profile/join-team?team_id=${form.team_id}`);
+            }
             if (data.xp) {
                 fireBigConfetti();
                 toast.success("Profile complete! +50 XP");
@@ -90,6 +100,21 @@ export default function Profile() {
 
     return (
         <div className="space-y-8" data-testid="profile-page">
+            {isFirstTime && (
+                <div className="glass-strong p-5 border border-yellow-500/40 bg-yellow-500/5" data-testid="first-time-banner">
+                    <div className="flex items-start gap-4">
+                        <div className="p-3 rounded-xl bg-yellow-500 text-black shadow-[0_0_20px_rgba(234,179,8,0.5)]">
+                            <Sparkle size={22} weight="fill" />
+                        </div>
+                        <div>
+                            <h3 className="font-display font-black text-xl">Welcome to the League, {user.name.split(" ")[0]}!</h3>
+                            <p className="text-sm text-zinc-400 mt-1">
+                                Complete your profile below to unlock the dashboard. Fill Date of Birth, Gender, Marital Status, City, State, and choose your Club + Team to proceed.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            )}
             <section className="glass-strong p-6 md:p-10 relative overflow-hidden">
                 <div className="absolute -top-24 -right-24 w-72 h-72 bg-yellow-500/10 rounded-full blur-3xl" />
                 <div className="absolute -bottom-24 -left-24 w-72 h-72 bg-blue-500/10 rounded-full blur-3xl" />
@@ -234,6 +259,14 @@ export default function Profile() {
                                         <input value={form.state} onChange={(e)=>setForm({...form, state: e.target.value})} className="field" />
                                     </Field>
                                 </FormRow>
+                                <Field label="Team" testId="profile-team-input">
+                                    <select value={form.team_id} onChange={(e)=>setForm({...form, team_id: e.target.value})} className="field">
+                                        <option value="">Select your team...</option>
+                                        {availableTeams.map((t) => (
+                                            <option key={t.team_id} value={t.team_id}>{t.name}</option>
+                                        ))}
+                                    </select>
+                                </Field>
                             </FormSection>
 
                             <FormSection title="Business">

@@ -1883,6 +1883,28 @@ async def update_profile(payload: ProfileUpdate, request: Request):
     return {"user": fresh, "completion": _profile_completion(fresh), "xp": xp_awarded}
 
 
+@api.get("/teams/public")
+async def list_teams_public(request: Request):
+    """Any user can see the list of active teams for self-selection."""
+    await get_current_user(request, db)
+    teams = await db.teams.find({}, {"_id": 0, "team_id": 1, "name": 1, "leader_id": 1}).sort("name", 1).to_list(200)
+    return teams
+
+
+@api.post("/profile/join-team")
+async def self_join_team(request: Request, team_id: str):
+    """Users self-select a team during profile completion."""
+    user = await get_current_user(request, db)
+    team = await db.teams.find_one({"team_id": team_id}, {"_id": 0})
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+    await db.users.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {"team_id": team_id, "team": team["name"]}},
+    )
+    return {"ok": True, "team": team}
+
+
 # ---------- Exports (CSV + PDF) ----------
 import io
 import csv

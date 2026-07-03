@@ -2,6 +2,14 @@ import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { Sword } from "@phosphor-icons/react";
 
+// Minimum required fields before user can access other pages
+const REQUIRED_PROFILE_FIELDS = ["dob", "gender", "marital_status", "city", "state", "club_type"];
+
+function isProfileMinimallyComplete(user) {
+    if (!user) return false;
+    return REQUIRED_PROFILE_FIELDS.every((f) => Boolean(user[f]));
+}
+
 export default function ProtectedRoute({ children, roles }) {
     const { user, loading } = useAuth();
     const location = useLocation();
@@ -21,6 +29,11 @@ export default function ProtectedRoute({ children, roles }) {
 
     if (!user) {
         return <Navigate to="/auth" replace state={{ from: location }} />;
+    }
+
+    // Force incomplete profile → /profile before accessing any other page
+    if (location.pathname !== "/profile" && !isProfileMinimallyComplete(user)) {
+        return <Navigate to="/profile" replace state={{ first_time: true }} />;
     }
 
     if (roles && !roles.includes(user.role)) {

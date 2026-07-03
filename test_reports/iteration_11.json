@@ -1,0 +1,22 @@
+{
+  "summary": "Full backend + frontend regression for the simplified-signup / force-profile-redirect / team self-select / decider Seasons hide / PWA refactor. All 5 backend pytest cases PASSED. All 20+ Playwright UI checks PASSED including: 4-field-only register form, first-time-banner post signup, ProtectedRoute redirect for incomplete users, admin bypass, profile-team-input dropdown, Attendance/League sidebar labels, Seasons visible for builder, Seasons HIDDEN for decider (verified via API patch + reload), manifest.json (200, theme_color=#EAB308, start_url=.), service-worker.js (200, contains CACHE_NAME), SW registration + controller present on reload. Admin club_type restored to 'builder' after decider test.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_refactor_signup.py",
+    "/app/test_reports/pytest/refactor_signup.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is now ~2318 lines — still growing; recommend splitting into routers/modules.",
+    "REQUIRED_PROFILE_FIELDS in ProtectedRoute does NOT include team_id, so join-team is not strictly required for dashboard access — intentional? if yes, ok. If team is expected before entering, add it.",
+    "/api/profile/join-team uses query-param (team_id) instead of JSON body — non-idiomatic for REST but works."
+  ],
+  "updated_files": ["/app/backend/tests/test_refactor_signup.py"],
+  "success_rate": {"backend": "100% (5/5)", "frontend": "100% (20/20 checks)"},
+  "test_credentials": "admin@spartans.com/Spartan123!, member@spartans.com/Member123!",
+  "seed_data_creation": "Registered a transient TEST_reg_* user and a test_pw_* user for signup+redirect flow. Temporarily flipped admin.club_type to 'decider' and restored to 'builder'.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "All refactor items verified end-to-end on preview URL. PWA fully functional (manifest+SW+registration+controller). Admin.club_type restored to builder. New test file at /app/backend/tests/test_refactor_signup.py covers register minimal, /teams/public auth+listing, /profile/join-team happy+404."
+}

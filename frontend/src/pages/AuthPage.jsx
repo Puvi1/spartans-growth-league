@@ -17,7 +17,7 @@ export default function AuthPage() {
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [name, setName] = useState("");
-    const [extra, setExtra] = useState({ phone: "", dob: "", gender: "", city: "", state: "" });
+    const [phone, setPhone] = useState("");
     const [error, setError] = useState("");
     const [submitting, setSubmitting] = useState(false);
     const { login, register } = useAuth();
@@ -33,13 +33,15 @@ export default function AuthPage() {
             if (mode === "login") {
                 await login(email, password);
                 toast.success("Welcome back, Spartan!");
+                navigate(from, { replace: true });
             } else {
                 const payload = { email, password, name };
-                Object.entries(extra).forEach(([k, v]) => { if (v) payload[k] = v; });
+                if (phone) payload.phone = phone;
                 await register(payload);
                 toast.success("Your Spartan journey begins now!");
+                // New users go straight to profile completion
+                navigate("/profile", { replace: true, state: { first_time: true } });
             }
-            navigate(from, { replace: true });
         } catch (err) {
             setError(formatApiError(err.response?.data?.detail) || err.message);
         } finally {
@@ -159,19 +161,15 @@ export default function AuthPage() {
                         />
 
                         {mode === "register" && (
-                            <div className="space-y-3 pt-1 border-t border-white/5">
-                                <div className="text-[10px] uppercase tracking-[0.25em] text-yellow-500/70 pt-2">
-                                    Optional (finish later in Profile)
-                                </div>
-                                <div className="grid grid-cols-2 gap-3">
-                                    <input type="tel" placeholder="Mobile" value={extra.phone} onChange={(e) => setExtra({...extra, phone: e.target.value})} className="field" data-testid="auth-phone-input" />
-                                    <input type="date" placeholder="DOB" value={extra.dob} onChange={(e) => setExtra({...extra, dob: e.target.value})} className="field" data-testid="auth-dob-input" />
-                                </div>
-                                <div className="grid grid-cols-2 gap-3">
-                                    <input placeholder="City" value={extra.city} onChange={(e) => setExtra({...extra, city: e.target.value})} className="field" data-testid="auth-city-input" />
-                                    <input placeholder="State" value={extra.state} onChange={(e) => setExtra({...extra, state: e.target.value})} className="field" data-testid="auth-state-input" />
-                                </div>
-                            </div>
+                            <IconInput
+                                icon={Envelope}
+                                type="tel"
+                                placeholder="Mobile number"
+                                value={phone}
+                                onChange={(e) => setPhone(e.target.value)}
+                                testId="auth-phone-input"
+                                required
+                            />
                         )}
 
                         <button

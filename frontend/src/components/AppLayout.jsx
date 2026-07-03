@@ -10,16 +10,15 @@ import { motion } from "framer-motion";
 const BASE_NAV = [
     { to: "/", icon: House, label: "Dashboard", testId: "nav-dashboard" },
     { to: "/missions", icon: Crosshair, label: "Missions", testId: "nav-missions" },
-    { to: "/weekly-attendance", icon: CalendarCheck, label: "Weekly", testId: "nav-weekly" },
-    { to: "/seasons", icon: MedalMilitary, label: "Seasons", testId: "nav-seasons" },
+    { to: "/weekly-attendance", icon: CalendarCheck, label: "Attendance", testId: "nav-weekly" },
+    { to: "/seasons", icon: MedalMilitary, label: "Seasons", testId: "nav-seasons", requiresSeasonAccess: true },
     { to: "/tasks", icon: ClipboardText, label: "Tasks", testId: "nav-tasks" },
     { to: "/team-league", icon: GameController, label: "Team League", testId: "nav-team-league" },
+    { to: "/leaderboard", icon: Trophy, label: "League", testId: "nav-leaderboard" },
     { to: "/rewards", icon: Gift, label: "Rewards", testId: "nav-rewards" },
     { to: "/prospects", icon: Target, label: "Prospects", testId: "nav-prospects" },
     { to: "/followups", icon: Phone, label: "Follow-Ups", testId: "nav-followups" },
-    { to: "/attendance", icon: Calendar, label: "Attendance", testId: "nav-attendance" },
     { to: "/challenges", icon: Fire, label: "Challenges", testId: "nav-challenges" },
-    { to: "/leaderboard", icon: Trophy, label: "Leaderboard", testId: "nav-leaderboard" },
     { to: "/reports", icon: ChartBar, label: "Reports", testId: "nav-reports" },
     { to: "/profile", icon: User, label: "Profile", testId: "nav-profile" },
 ];
@@ -28,16 +27,18 @@ const LEADER_NAV = { to: "/my-team", icon: UsersThree, label: "My Team", testId:
 const ADMIN_USERS_NAV = { to: "/admin", icon: Users, label: "All Users", testId: "nav-admin" };
 const ADMIN_TEAMS_NAV = { to: "/teams", icon: ChartLine, label: "Teams", testId: "nav-teams" };
 
-function navForRole(role) {
-    if (role === "super_admin") return [...BASE_NAV, ADMIN_USERS_NAV, ADMIN_TEAMS_NAV];
-    if (role === "team_leader") return [...BASE_NAV, LEADER_NAV];
-    return BASE_NAV;
+function navForRole(role, club) {
+    // Filter out Seasons for Decider club
+    const base = BASE_NAV.filter((n) => !n.requiresSeasonAccess || club !== "decider");
+    if (role === "super_admin") return [...base, ADMIN_USERS_NAV, ADMIN_TEAMS_NAV];
+    if (role === "team_leader") return [...base, LEADER_NAV];
+    return base;
 }
 
 export default function AppLayout({ children }) {
     const { user, logout } = useAuth();
     const navigate = useNavigate();
-    const nav = navForRole(user?.role);
+    const nav = navForRole(user?.role, user?.club_type);
 
     const initials = (user?.name || "S").split(" ").map((s) => s[0]).slice(0, 2).join("").toUpperCase();
 
