@@ -184,3 +184,30 @@ Gamified performance tracking & accountability platform for a Crypto Network Mar
 ### Test Coverage
 - Backend: **18/18** (100%) — attendance bonus formula, redeem XP deduction, insufficient XP 400, stock=0 400, admin-only mutations, PDF/CSV Content-Type checks, profile completion idempotency
 - Frontend: **14/14** (100%) — sidebar nav, role visibility, admin CRUD flow, member redeem UI, export downloads, mobile responsive
+
+## Member Profile System — Expanded (Feb 2026)
+
+### New User Fields
+**Basic**: dob, gender, marital_status, anniversary_date, anniversary_photo, city, state
+**Business**: joining_date, club_type (decider/believer/converter/builder), position
+**Personal**: favourite_food, favourite_place, favourite_hobby
+(existing: name, email, phone, avatar_url, bio, team, team_id, is_believer)
+
+### Registration
+- `RegisterIn` accepts optional: phone, dob, gender, city, state
+- All fields persist on user document immediately
+
+### Profile Editing
+- `PATCH /api/profile` accepts all 16+ fields (see ProfileUpdate)
+- Pydantic enum validation for club_type / marital_status / gender (422 on invalid)
+- One-time +50 XP when all 16 completion fields filled (idempotent)
+- Frontend Profile page has 3-section edit form: Basic Info / Business / Personal Favourites; DetailRow display cards for view mode; anniversary photo displayed as image
+
+### Celebrations
+- `GET /api/celebrations/me` — is_birthday, is_anniversary (only if married)
+- `GET /api/celebrations/today` — global list of all users with birthday/anniversary today
+- Match logic: MM-DD comparison, timezone-independent
+- Frontend `CelebrationBanner` component (rendered on Dashboard): fetches celebrations/today, fires big confetti on mount, localStorage-dismissible per day, shows warriors with birthday cake or heart icon in themed gradient card
+
+### Test Coverage
+- Backend: **11/11** (100%) — registration new fields, PATCH accepts all fields, enum 422 rejection, celebrations logic (birthday vs anniversary, married check), 16-field completion pct
