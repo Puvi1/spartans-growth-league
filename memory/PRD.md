@@ -94,3 +94,52 @@ Gamified performance tracking & accountability platform for a Crypto Network Mar
 ### Test Results
 - Backend: 13/13 mission tests passing (after index fix)
 - Frontend: verified via screenshot (missions page + modal render correctly, GPS permission flow works)
+
+## Weekly + Season Attendance + Believer + Tasks (Feb 2026)
+
+### Collections
+- `weekly_events` — event_id UUID unique, name, weekday (0-6), is_believer bool, active
+- `event_attendance` — compound unique (user_id, event_id, event_date). Fields: status (present|absent|na), season_id (nullable), locked (computed)
+- `seasons` — season_id, name, start_date, end_date, is_believer, created_by
+- `tasks` — task_id unique, assigned_to+due_date compound, title, description, xp_reward, status (pending|completed), completed_at
+
+### Auto-Lock (Critical)
+- Timezone: **IST (Asia/Kolkata)**, cutoff **8:00 AM** on event day
+- `_is_locked(event_date)` returns True once `now_ist >= combine(event_date, 08:00, IST)`
+- Backend rejects `POST /event-attendance/mark` with 403 when locked
+
+### Seeded Defaults (on startup if empty)
+- Tuesday — Believer Season Meeting (is_believer=true)
+- Thursday — MCM (Meta Champion Meet)
+- Saturday — Spartans Team Meeting
+
+### Endpoints
+- `GET /api/weekly-events` (auth)
+- `POST/PATCH/DELETE /api/weekly-events[/<id>]` (super_admin)
+- `GET /api/event-attendance/week?week_of=YYYY-MM-DD`
+- `POST /api/event-attendance/mark` — upsert on (user, event, date), auto-season assignment
+- `GET/POST/DELETE /api/seasons[/<id>]` (create/delete super_admin only)
+- `GET /api/seasons/{id}/my-report` — personal attendance stats + per-event breakdown + attendance_pct
+- `GET /api/seasons/{id}/team-report` — team_leader (own team) or super_admin (all users; believer season scopes to is_believer=true users)
+- `PATCH /api/admin/users/{uid}/believer` (super_admin)
+- `GET /api/tasks` (own) or `?all_users=true` (super_admin)
+- `POST /api/tasks` (super_admin)
+- `PATCH /api/tasks/{id}/complete` (assignee or super_admin) — awards XP
+- `DELETE /api/tasks/{id}` (super_admin)
+
+### Believer Module
+- `user.is_believer` boolean flag (super_admin toggle)
+- Believer seasons filter events to weekday=1 (Tuesday) only in `_compute_report`
+- Team-report for believer season only counts `is_believer=true` users
+
+### Frontend Pages
+- `/weekly-attendance` — week nav, 3 event cards, colored borders on marked status, LOCKED/OPEN chips, 8 AM IST notice
+- `/seasons` — All/Regular/Believer filter, card grid, admin create modal (name/dates/believer toggle), tap-to-open report modal with % + progress bar + per-event breakdown
+- `/tasks` — Mine/All toggle (admin), Assign Task modal (admin), pending list with Complete button (assignee), Recently Crushed archive
+
+### Attendance Percentage Formula
+`attendance_pct = present / (present + absent) * 100` — NA and unmarked excluded from denominator
+
+### Test Coverage
+- Backend: **30/30** (100%) — /app/backend/tests/test_weekly_attendance.py
+- Frontend: **30/30** (100%) across all 3 roles + mobile responsive at 375x812
