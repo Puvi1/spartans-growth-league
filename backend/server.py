@@ -117,6 +117,62 @@ class RegisterIn(BaseModel):
     city: Optional[str] = None
     state: Optional[str] = None
 
+    @classmethod
+    def _validate_phone(cls, v):
+        if v is None or v == "":
+            return None
+        s = "".join(ch for ch in str(v) if ch.isdigit())
+        if len(s) != 10:
+            raise ValueError("Mobile number must be exactly 10 digits")
+        return s
+
+
+import re
+from pydantic import field_validator
+
+
+def _clean_phone_10(v):
+    if v is None or v == "":
+        return None
+    s = re.sub(r"\D", "", str(v))
+    if len(s) != 10:
+        raise ValueError("Mobile number must be exactly 10 digits")
+    return s
+
+
+def _reject_future_date(v):
+    if v is None or v == "":
+        return None
+    try:
+        d = date.fromisoformat(v)
+    except Exception:
+        raise ValueError("Invalid date (expected YYYY-MM-DD)")
+    if d > date.today():
+        raise ValueError("Date cannot be in the future")
+    return v
+
+
+# Rebind RegisterIn with validators
+class RegisterIn(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=6)
+    name: str = Field(min_length=1)
+    phone: Optional[str] = None
+    dob: Optional[str] = None
+    gender: Optional[Literal["male", "female", "other", "prefer_not"]] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+
+    @field_validator("phone")
+    @classmethod
+    def v_phone(cls, v):
+        return _clean_phone_10(v)
+
+    @field_validator("dob")
+    @classmethod
+    def v_dob(cls, v):
+        return _reject_future_date(v)
+
 
 class LoginIn(BaseModel):
     email: EmailStr
@@ -263,6 +319,54 @@ class ProfileUpdate(BaseModel):
     favourite_place: Optional[str] = None
     favourite_hobby: Optional[str] = None
     bio: Optional[str] = None
+
+    @field_validator("phone")
+    @classmethod
+    def v_phone(cls, v):
+        return _clean_phone_10(v)
+
+    @field_validator("dob", "joining_date")
+    @classmethod
+    def v_dates(cls, v):
+        return _reject_future_date(v)
+
+
+POSITION_BADGES = ["team_leader", "star_performer", "rising_star", "consistent_achiever", "top_recruiter"]
+
+
+class PositionBadgesUpdate(BaseModel):
+    badges: List[str]
+
+    @field_validator("badges")
+    @classmethod
+    def v_badges(cls, v):
+        invalid = [b for b in v if b not in POSITION_BADGES]
+        if invalid:
+            raise ValueError(f"Invalid badges: {invalid}")
+        return v
+
+
+class GoalIn(BaseModel):
+    title: str = Field(min_length=1)
+    target: int = Field(ge=1)
+    period: Literal["weekly", "monthly"] = "weekly"
+    xp_reward: int = Field(default=50, ge=0, le=1000)
+
+
+class GoalProgress(BaseModel):
+    progress: int = Field(ge=0)
+
+
+class AddMemberIn(BaseModel):
+    email: EmailStr
+    name: str = Field(min_length=1)
+    password: str = Field(min_length=6)
+    phone: Optional[str] = None
+
+    @field_validator("phone")
+    @classmethod
+    def v_phone(cls, v):
+        return _clean_phone_10(v)
 
 
 class ChallengeIn(BaseModel):
@@ -1320,6 +1424,143 @@ async def admin_analytics(request: Request):
     }
 
 
+@api.get("/admin/dashboard-widgets")
+async def admin_dashboard_widgets(request: Request):
+    """Extended admin dashboard: missions today, pending tasks, top individual, top team,
+    season champion, upcoming birthdays / anniversaries."""
+    user = await get_current_user(request, db)
+    require_role(user, ["super_admin", "team_leader"])
+
+    today = date.today()
+    today_iso = today.isoformat()
+    today_start_iso = today_iso + "T00:00:00+00:00"
+
+    # Scope
+    if user["role"] == "team_leader":
+        team = await _my_team_or_403(user)
+        member_ids = [m["user_id"] async for m in db.users.find({"team_id": team["team_id"]}, {"_id": 0, "user_id": 1})]
+        user_filter = {"user_id": {"$in": member_ids}} if member_ids else {"user_id": {"$in": []}}
+        assignee_filter = {"assigned_to": {"$in": member_ids}} if member_ids else {"assigned_to": {"$in": []}}
+        users_all = await db.users.find({"team_id": team["team_id"]}, {"_id": 0, "password_hash": 0}).to_list(1000)
+    else:
+        user_filter = {}
+        assignee_filter = {}
+        users_all = await db.users.find({}, {"_id": 0, "password_hash": 0}).to_list(5000)
+
+    # Missions today (created today)
+    missions_today = await db.missions.count_documents({
+        **user_filter, "created_at": {"$gte": today_start_iso},
+    })
+    missions_converted_today = await db.missions.count_documents({
+        **user_filter, "status": "converted", "updated_at": {"$gte": today_start_iso},
+    })
+
+    # Pending tasks
+    pending_tasks = await db.tasks.count_documents({**assignee_filter, "status": "pending"})
+    overdue_tasks = await db.tasks.count_documents({
+        **assignee_filter, "status": "pending", "due_date": {"$lt": today_iso},
+    })
+
+    # Top individual (by all-time XP)
+    top_individual = None
+    if users_all:
+        top_u = max(users_all, key=lambda u: u.get("xp", 0))
+        if top_u.get("xp", 0) > 0:
+            top_individual = {
+                "user_id": top_u["user_id"], "name": top_u["name"],
+                "team": top_u.get("team"), "xp": top_u.get("xp", 0),
+                "level": top_u.get("level", 1),
+                "position_badges": top_u.get("position_badges", []),
+            }
+
+    # Top team (by XP sum)
+    top_team = None
+    teams = await db.teams.find({}, {"_id": 0}).to_list(200)
+    team_scores = []
+    for t in teams:
+        members = [u for u in users_all if u.get("team_id") == t["team_id"]] if user["role"] == "team_leader" \
+                  else await db.users.find({"team_id": t["team_id"]}, {"_id": 0, "xp": 1}).to_list(1000)
+        xp = sum(m.get("xp", 0) for m in members)
+        if xp > 0:
+            team_scores.append({"team_id": t["team_id"], "name": t["name"], "xp": xp, "members": len(members)})
+    if team_scores:
+        top_team = max(team_scores, key=lambda t: t["xp"])
+
+    # Season champion — top XP earner in currently active season
+    active_season = await _current_active_season()
+    season_champion = None
+    if active_season:
+        start_iso, end_iso = _season_iso_range(active_season)
+        pipeline = [
+            {"$match": {"created_at": {"$gte": start_iso, "$lte": end_iso}}},
+        ]
+        if user["role"] == "team_leader" and member_ids:
+            pipeline[0]["$match"]["user_id"] = {"$in": member_ids}
+        pipeline += [
+            {"$group": {"_id": "$user_id", "xp": {"$sum": "$amount"}}},
+            {"$sort": {"xp": -1}},
+            {"$limit": 1},
+        ]
+        rows = await db.xp_events.aggregate(pipeline).to_list(1)
+        if rows:
+            u = await db.users.find_one({"user_id": rows[0]["_id"]}, {"_id": 0, "password_hash": 0})
+            if u:
+                season_champion = {
+                    "user_id": u["user_id"], "name": u["name"], "team": u.get("team"),
+                    "xp_in_season": rows[0]["xp"], "level": u.get("level", 1),
+                    "position_badges": u.get("position_badges", []),
+                    "season_name": active_season["name"],
+                }
+
+    # Upcoming celebrations (next 14 days including today)
+    upcoming_birthdays = []
+    upcoming_anniversaries = []
+    for u in users_all:
+        for field, out in [("dob", upcoming_birthdays), ("anniversary_date", upcoming_anniversaries)]:
+            v = u.get(field)
+            if not v:
+                continue
+            try:
+                d = date.fromisoformat(v)
+            except Exception:
+                continue
+            if field == "anniversary_date" and u.get("marital_status") != "married":
+                continue
+            # Find next occurrence
+            try:
+                this_year = d.replace(year=today.year)
+            except ValueError:
+                # Handle Feb 29 → Feb 28
+                this_year = d.replace(year=today.year, day=28)
+            if this_year < today:
+                try:
+                    this_year = this_year.replace(year=today.year + 1)
+                except ValueError:
+                    this_year = this_year.replace(year=today.year + 1, day=28)
+            days_until = (this_year - today).days
+            if days_until <= 14:
+                out.append({
+                    "user_id": u["user_id"], "name": u["name"],
+                    "team": u.get("team"), "date": this_year.isoformat(),
+                    "days_until": days_until,
+                    "avatar_url": u.get("avatar_url") or u.get("avatar_photo"),
+                })
+    upcoming_birthdays.sort(key=lambda x: x["days_until"])
+    upcoming_anniversaries.sort(key=lambda x: x["days_until"])
+
+    return {
+        "missions_today": missions_today,
+        "missions_converted_today": missions_converted_today,
+        "pending_tasks": pending_tasks,
+        "overdue_tasks": overdue_tasks,
+        "top_individual": top_individual,
+        "top_team": top_team,
+        "season_champion": season_champion,
+        "upcoming_birthdays": upcoming_birthdays[:5],
+        "upcoming_anniversaries": upcoming_anniversaries[:5],
+    }
+
+
 # ---------- Weekly Attendance / Seasons / Tasks ----------
 try:
     from zoneinfo import ZoneInfo
@@ -1797,6 +2038,209 @@ async def _team_attendance_pct(team_id: str, days: int = 30) -> dict:
     return {"present": present, "absent": absent, "na": na, "attendance_pct": pct}
 
 
+# ---------- Spartans League (Individual + Team + Season) ----------
+async def _current_active_season() -> Optional[dict]:
+    today_iso = date.today().isoformat()
+    active = await db.seasons.find_one(
+        {"start_date": {"$lte": today_iso}, "end_date": {"$gte": today_iso}},
+        {"_id": 0},
+        sort=[("start_date", -1)],
+    )
+    if active:
+        return active
+    # Fallback: most recent season
+    return await db.seasons.find_one({}, {"_id": 0}, sort=[("start_date", -1)])
+
+
+def _season_iso_range(season: dict):
+    s = season["start_date"]
+    e = season["end_date"]
+    return s + "T00:00:00+00:00", e + "T23:59:59+00:00"
+
+
+async def _user_stats_in_range(user_id: str, start_iso: str, end_iso: str) -> dict:
+    """Compute XP, missions, tasks, goals, attendance for a user in date window."""
+    xp_agg = await db.xp_events.aggregate([
+        {"$match": {"user_id": user_id, "created_at": {"$gte": start_iso, "$lte": end_iso}}},
+        {"$group": {"_id": None, "xp": {"$sum": "$amount"}}},
+    ]).to_list(1)
+    xp = xp_agg[0]["xp"] if xp_agg else 0
+    missions = await db.missions.count_documents({
+        "user_id": user_id,
+        "created_at": {"$gte": start_iso, "$lte": end_iso},
+    })
+    tasks = await db.tasks.count_documents({
+        "assigned_to": user_id, "status": "completed",
+        "completed_at": {"$gte": start_iso, "$lte": end_iso},
+    })
+    goals = await db.goals.count_documents({
+        "user_id": user_id, "status": "completed",
+        "completed_at": {"$gte": start_iso, "$lte": end_iso},
+    })
+    return {"xp": xp, "missions": missions, "tasks": tasks, "goals": goals}
+
+
+async def _user_attendance_in_season(user_id: str, season: dict) -> float:
+    marks = await db.event_attendance.find({
+        "user_id": user_id,
+        "event_date": {"$gte": season["start_date"], "$lte": season["end_date"]},
+    }, {"_id": 0}).to_list(50000)
+    present = sum(1 for m in marks if m["status"] == "present")
+    absent = sum(1 for m in marks if m["status"] == "absent")
+    countable = present + absent
+    return round((present / countable) * 100, 1) if countable else 0.0
+
+
+@api.get("/spartans-league/active-season")
+async def spartans_active_season(request: Request):
+    await get_current_user(request, db)
+    s = await _current_active_season()
+    return {"season": s}
+
+
+@api.get("/spartans-league/individual")
+async def spartans_individual(request: Request, season_id: Optional[str] = None, limit: int = 100):
+    await get_current_user(request, db)
+    season = None
+    if season_id:
+        season = await db.seasons.find_one({"season_id": season_id}, {"_id": 0})
+    else:
+        season = await _current_active_season()
+    users = await db.users.find({}, {"_id": 0, "password_hash": 0}).to_list(2000)
+    rows = []
+    if season:
+        start_iso, end_iso = _season_iso_range(season)
+        for u in users:
+            stats = await _user_stats_in_range(u["user_id"], start_iso, end_iso)
+            att_pct = await _user_attendance_in_season(u["user_id"], season)
+            score = stats["xp"] + stats["missions"] * 5 + stats["tasks"] * 8 + stats["goals"] * 12 + att_pct * 2
+            rows.append({
+                "user_id": u["user_id"], "name": u["name"],
+                "avatar_url": u.get("avatar_url") or u.get("picture"),
+                "team": u.get("team"), "level": u.get("level", 1),
+                "streak_current": u.get("streak_current", 0),
+                "position_badges": u.get("position_badges", []),
+                "xp": stats["xp"], "missions": stats["missions"], "tasks": stats["tasks"],
+                "goals": stats["goals"], "attendance_pct": att_pct,
+                "score": round(score, 1),
+            })
+    else:
+        # No season: fall back to all-time XP
+        for u in users:
+            rows.append({
+                "user_id": u["user_id"], "name": u["name"],
+                "avatar_url": u.get("avatar_url") or u.get("picture"),
+                "team": u.get("team"), "level": u.get("level", 1),
+                "streak_current": u.get("streak_current", 0),
+                "position_badges": u.get("position_badges", []),
+                "xp": u.get("xp", 0), "missions": 0, "tasks": 0, "goals": 0,
+                "attendance_pct": 0.0, "score": u.get("xp", 0),
+            })
+    rows.sort(key=lambda r: r["score"], reverse=True)
+    rows = rows[:limit]
+    for i, r in enumerate(rows):
+        r["rank"] = i + 1
+    return {"season": season, "rows": rows}
+
+
+@api.get("/spartans-league/team")
+async def spartans_team_league(request: Request, season_id: Optional[str] = None):
+    """
+    Team League formula:
+      40% XP + 25% Attendance + 15% Missions + 10% Tasks + 10% Goals
+    All metrics scoped to the active/specified season.
+    """
+    await get_current_user(request, db)
+    season = None
+    if season_id:
+        season = await db.seasons.find_one({"season_id": season_id}, {"_id": 0})
+    else:
+        season = await _current_active_season()
+
+    teams = await db.teams.find({}, {"_id": 0}).to_list(200)
+    raw = []
+    if season:
+        start_iso, end_iso = _season_iso_range(season)
+    for t in teams:
+        members = await db.users.find({"team_id": t["team_id"]}, {"_id": 0, "password_hash": 0}).to_list(500)
+        if not members:
+            continue
+        mids = [m["user_id"] for m in members]
+        # xp/missions/tasks/goals aggregate over members
+        if season:
+            xp_agg = await db.xp_events.aggregate([
+                {"$match": {"user_id": {"$in": mids}, "created_at": {"$gte": start_iso, "$lte": end_iso}}},
+                {"$group": {"_id": None, "xp": {"$sum": "$amount"}}},
+            ]).to_list(1)
+            xp = xp_agg[0]["xp"] if xp_agg else 0
+            missions = await db.missions.count_documents({
+                "user_id": {"$in": mids}, "created_at": {"$gte": start_iso, "$lte": end_iso},
+            })
+            tasks = await db.tasks.count_documents({
+                "assigned_to": {"$in": mids}, "status": "completed",
+                "completed_at": {"$gte": start_iso, "$lte": end_iso},
+            })
+            goals = await db.goals.count_documents({
+                "user_id": {"$in": mids}, "status": "completed",
+                "completed_at": {"$gte": start_iso, "$lte": end_iso},
+            })
+            att = await _team_attendance_pct_in_range(t["team_id"], season["start_date"], season["end_date"])
+        else:
+            xp = sum(m.get("xp", 0) for m in members)
+            missions = await db.missions.count_documents({"user_id": {"$in": mids}})
+            tasks = await db.tasks.count_documents({"assigned_to": {"$in": mids}, "status": "completed"})
+            goals = await db.goals.count_documents({"user_id": {"$in": mids}, "status": "completed"})
+            att = 0.0
+        raw.append({
+            "team_id": t["team_id"], "name": t["name"], "members": len(members),
+            "xp": xp, "missions": missions, "tasks": tasks, "goals": goals,
+            "attendance_pct": att, "leader_id": t.get("leader_id"),
+        })
+    # Normalize each metric to 0..100 relative to max
+    max_xp = max((r["xp"] for r in raw), default=0) or 1
+    max_mis = max((r["missions"] for r in raw), default=0) or 1
+    max_tsk = max((r["tasks"] for r in raw), default=0) or 1
+    max_gol = max((r["goals"] for r in raw), default=0) or 1
+    for r in raw:
+        score = (
+            (r["xp"] / max_xp) * 40 +
+            (r["attendance_pct"] / 100.0) * 25 +
+            (r["missions"] / max_mis) * 15 +
+            (r["tasks"] / max_tsk) * 10 +
+            (r["goals"] / max_gol) * 10
+        )
+        r["score"] = round(score, 2)
+        r["breakdown"] = {
+            "xp_pts": round((r["xp"] / max_xp) * 40, 2),
+            "attendance_pts": round((r["attendance_pct"] / 100.0) * 25, 2),
+            "missions_pts": round((r["missions"] / max_mis) * 15, 2),
+            "tasks_pts": round((r["tasks"] / max_tsk) * 10, 2),
+            "goals_pts": round((r["goals"] / max_gol) * 10, 2),
+        }
+    raw.sort(key=lambda r: r["score"], reverse=True)
+    for i, r in enumerate(raw):
+        r["rank"] = i + 1
+    return {
+        "season": season, "teams": raw,
+        "weights": {"xp": 40, "attendance": 25, "missions": 15, "tasks": 10, "goals": 10},
+    }
+
+
+async def _team_attendance_pct_in_range(team_id: str, start_date: str, end_date: str) -> float:
+    team_users = await db.users.find({"team_id": team_id}, {"_id": 0, "user_id": 1}).to_list(1000)
+    uids = [t["user_id"] for t in team_users]
+    if not uids:
+        return 0.0
+    marks = await db.event_attendance.find({
+        "user_id": {"$in": uids},
+        "event_date": {"$gte": start_date, "$lte": end_date},
+    }, {"_id": 0}).to_list(50000)
+    present = sum(1 for m in marks if m["status"] == "present")
+    absent = sum(1 for m in marks if m["status"] == "absent")
+    countable = present + absent
+    return round((present / countable) * 100, 1) if countable else 0.0
+
+
 @api.get("/team-league")
 async def team_league(request: Request):
     await get_current_user(request, db)
@@ -1847,7 +2291,7 @@ async def team_league(request: Request):
 # ---------- Profile Completion ----------
 PROFILE_FIELDS = ["name", "email", "avatar_url", "team_id", "phone", "bio",
                   "dob", "gender", "marital_status", "city", "state",
-                  "club_type", "position",
+                  "club_type",
                   "favourite_food", "favourite_place", "favourite_hobby"]
 PROFILE_COMPLETION_XP = 50
 
@@ -2054,6 +2498,142 @@ async def export_daily(request: Request, format: str = "csv", day: Optional[str]
     return _csv_response(filename + ".csv", headers, rows)
 
 
+# ---------- Unified Report Exports (Missions/Tasks/Goals/Followups/League) ----------
+async def _scoped_user_ids(user: dict) -> Optional[List[str]]:
+    """Return None for global scope, otherwise a list of member ids for team_leader."""
+    if user["role"] == "team_leader":
+        team = await _my_team_or_403(user)
+        return [m["user_id"] async for m in db.users.find({"team_id": team["team_id"]}, {"_id": 0, "user_id": 1})]
+    return None
+
+
+async def _uid_to_name(uids: List[str]) -> dict:
+    us = await db.users.find({"user_id": {"$in": uids}}, {"_id": 0, "user_id": 1, "name": 1, "team": 1}).to_list(len(uids) or 1)
+    return {u["user_id"]: u for u in us}
+
+
+@api.get("/exports/missions")
+async def export_missions(request: Request, format: str = "csv"):
+    user = await get_current_user(request, db)
+    require_role(user, ["super_admin", "team_leader"])
+    scoped = await _scoped_user_ids(user)
+    q = {"user_id": {"$in": scoped}} if scoped is not None else {}
+    missions = await db.missions.find(q, {"_id": 0}).sort("created_at", -1).to_list(5000)
+    uids = list({m["user_id"] for m in missions})
+    umap = await _uid_to_name(uids)
+    headers = ["Date", "Spartan", "Team", "Prospect", "Mobile", "Status", "GPS"]
+    rows = []
+    for m in missions:
+        u = umap.get(m["user_id"], {})
+        rows.append([
+            m.get("created_at", "")[:10],
+            u.get("name", "?"),
+            u.get("team", "-"),
+            m.get("prospect_name", ""),
+            m.get("mobile_number", ""),
+            m.get("status", ""),
+            f"{m.get('lat', '')},{m.get('lng', '')}" if m.get("lat") else "-",
+        ])
+    filename = f"missions-{date.today().isoformat()}"
+    if format == "pdf":
+        return _pdf_response(filename + ".pdf", "Missions Report", headers, rows)
+    return _csv_response(filename + ".csv", headers, rows)
+
+
+@api.get("/exports/tasks")
+async def export_tasks(request: Request, format: str = "csv", status: Optional[str] = None):
+    user = await get_current_user(request, db)
+    require_role(user, ["super_admin", "team_leader"])
+    scoped = await _scoped_user_ids(user)
+    q = {}
+    if scoped is not None:
+        q["assigned_to"] = {"$in": scoped}
+    if status:
+        q["status"] = status
+    tasks = await db.tasks.find(q, {"_id": 0}).sort("due_date", 1).to_list(5000)
+    uids = list({t["assigned_to"] for t in tasks})
+    umap = await _uid_to_name(uids)
+    headers = ["Title", "Assignee", "Team", "Due Date", "Status", "XP Reward", "Completed At"]
+    rows = []
+    for t in tasks:
+        u = umap.get(t["assigned_to"], {})
+        rows.append([t.get("title", ""), u.get("name", "?"), u.get("team", "-"),
+                     t.get("due_date", ""), t.get("status", ""), t.get("xp_reward", 0),
+                     (t.get("completed_at") or "")[:19]])
+    filename = f"tasks-{date.today().isoformat()}"
+    if format == "pdf":
+        return _pdf_response(filename + ".pdf", "Tasks Report", headers, rows)
+    return _csv_response(filename + ".csv", headers, rows)
+
+
+@api.get("/exports/goals")
+async def export_goals(request: Request, format: str = "csv"):
+    user = await get_current_user(request, db)
+    require_role(user, ["super_admin", "team_leader"])
+    scoped = await _scoped_user_ids(user)
+    q = {"user_id": {"$in": scoped}} if scoped is not None else {}
+    goals = await db.goals.find(q, {"_id": 0}).sort("created_at", -1).to_list(5000)
+    uids = list({g["user_id"] for g in goals})
+    umap = await _uid_to_name(uids)
+    headers = ["Title", "Spartan", "Team", "Period", "Progress", "Target", "Status", "XP Reward", "Completed At"]
+    rows = []
+    for g in goals:
+        u = umap.get(g["user_id"], {})
+        rows.append([g.get("title", ""), u.get("name", "?"), u.get("team", "-"),
+                     g.get("period", ""), g.get("progress", 0), g.get("target", 0),
+                     g.get("status", ""), g.get("xp_reward", 0),
+                     (g.get("completed_at") or "")[:19]])
+    filename = f"goals-{date.today().isoformat()}"
+    if format == "pdf":
+        return _pdf_response(filename + ".pdf", "Goals Report", headers, rows)
+    return _csv_response(filename + ".csv", headers, rows)
+
+
+@api.get("/exports/followups")
+async def export_followups(request: Request, format: str = "csv"):
+    user = await get_current_user(request, db)
+    require_role(user, ["super_admin", "team_leader"])
+    scoped = await _scoped_user_ids(user)
+    q = {"user_id": {"$in": scoped}} if scoped is not None else {}
+    fus = await db.followups.find(q, {"_id": 0}).sort("due_date", 1).to_list(5000)
+    uids = list({f["user_id"] for f in fus})
+    umap = await _uid_to_name(uids)
+    headers = ["Title", "Spartan", "Team", "Due Date", "Status", "Notes"]
+    rows = []
+    for f in fus:
+        u = umap.get(f["user_id"], {})
+        rows.append([f.get("title", ""), u.get("name", "?"), u.get("team", "-"),
+                     f.get("due_date", ""), f.get("status", ""), (f.get("notes") or "")[:100]])
+    filename = f"followups-{date.today().isoformat()}"
+    if format == "pdf":
+        return _pdf_response(filename + ".pdf", "Follow-Ups Report", headers, rows)
+    return _csv_response(filename + ".csv", headers, rows)
+
+
+@api.get("/exports/spartans-league")
+async def export_spartans_league(request: Request, format: str = "csv", scope: str = "individual", season_id: Optional[str] = None):
+    """scope: individual | team"""
+    user = await get_current_user(request, db)
+    require_role(user, ["super_admin", "team_leader"])
+    if scope == "team":
+        data = await spartans_team_league(request, season_id=season_id)
+        headers = ["Rank", "Team", "Members", "Score", "XP", "Attendance %", "Missions", "Tasks", "Goals"]
+        rows = [[r["rank"], r["name"], r["members"], r["score"], r["xp"],
+                 r["attendance_pct"], r["missions"], r["tasks"], r["goals"]] for r in data["teams"]]
+        title = "Spartans League — Team"
+        filename = f"spartans-league-team-{date.today().isoformat()}"
+    else:
+        data = await spartans_individual(request, season_id=season_id, limit=500)
+        headers = ["Rank", "Name", "Team", "Level", "Score", "XP", "Missions", "Tasks", "Goals", "Attendance %"]
+        rows = [[r["rank"], r["name"], r.get("team") or "-", r["level"], r["score"],
+                 r["xp"], r["missions"], r["tasks"], r["goals"], r["attendance_pct"]] for r in data["rows"]]
+        title = "Spartans League — Individual"
+        filename = f"spartans-league-individual-{date.today().isoformat()}"
+    if format == "pdf":
+        return _pdf_response(filename + ".pdf", title, headers, rows)
+    return _csv_response(filename + ".csv", headers, rows)
+
+
 # ---------- Celebrations ----------
 def _md(iso_date: str) -> str:
     """Return MM-DD from a YYYY-MM-DD string."""
@@ -2100,6 +2680,115 @@ async def team_celebrations(request: Request):
     return {"date": date.today().isoformat(), "birthdays": birthdays, "anniversaries": anniversaries}
 
 
+# ---------- Position Badges (admin-controlled, publicly visible) ----------
+@api.get("/position-badges/catalog")
+async def badge_catalog(request: Request):
+    await get_current_user(request, db)
+    return {"badges": POSITION_BADGES}
+
+
+@api.patch("/admin/users/{uid}/position-badges")
+async def set_position_badges(uid: str, payload: PositionBadgesUpdate, request: Request):
+    user = await get_current_user(request, db)
+    require_role(user, ["super_admin"])
+    r = await db.users.update_one({"user_id": uid}, {"$set": {"position_badges": payload.badges}})
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"ok": True, "position_badges": payload.badges}
+
+
+# ---------- Team Leader: Add Member to own team ----------
+@api.post("/team-leader/add-member")
+async def leader_add_member(payload: AddMemberIn, request: Request):
+    user = await get_current_user(request, db)
+    require_role(user, ["team_leader", "super_admin"])
+    team = None
+    if user["role"] == "team_leader":
+        team = await db.teams.find_one({"leader_id": user["user_id"]}, {"_id": 0})
+        if not team:
+            raise HTTPException(status_code=404, detail="You do not lead a team")
+    email = payload.email.lower().strip()
+    exists = await db.users.find_one({"email": email})
+    if exists:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    new_uid = f"user_{uuid.uuid4().hex[:12]}"
+    doc = {
+        "user_id": new_uid, "email": email, "name": payload.name.strip(),
+        "password_hash": hash_password(payload.password), "role": "member",
+        "avatar_url": None, "picture": None, "xp": 0, "level": 1,
+        "streak_current": 0, "streak_longest": 0, "last_checkin_date": None,
+        "team": team["name"] if team else None,
+        "team_id": team["team_id"] if team else None,
+        "phone": payload.phone, "badges": [], "position_badges": [],
+        "created_at": _iso(datetime.now(timezone.utc)), "active": True,
+        "added_by_leader": user["user_id"],
+    }
+    await db.users.insert_one(doc)
+    return {"ok": True, "user": _clean(doc)}
+
+
+# ---------- Goals ----------
+def _goal_period_start(period: str) -> str:
+    today = date.today()
+    if period == "weekly":
+        return (today - timedelta(days=today.weekday())).isoformat()
+    return today.replace(day=1).isoformat()
+
+
+@api.get("/goals")
+async def list_goals(request: Request):
+    user = await get_current_user(request, db)
+    items = await db.goals.find({"user_id": user["user_id"]}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    return items
+
+
+@api.post("/goals")
+async def create_goal(payload: GoalIn, request: Request):
+    user = await get_current_user(request, db)
+    doc = payload.model_dump()
+    doc.update({
+        "goal_id": str(uuid.uuid4()),
+        "user_id": user["user_id"],
+        "progress": 0,
+        "status": "active",
+        "period_start": _goal_period_start(payload.period),
+        "completed_at": None,
+        "created_at": _iso(datetime.now(timezone.utc)),
+    })
+    await db.goals.insert_one(doc)
+    return _clean(doc)
+
+
+@api.patch("/goals/{gid}/progress")
+async def update_goal_progress(gid: str, payload: GoalProgress, request: Request):
+    user = await get_current_user(request, db)
+    g = await db.goals.find_one({"goal_id": gid, "user_id": user["user_id"]}, {"_id": 0})
+    if not g:
+        raise HTTPException(status_code=404, detail="Goal not found")
+    if g.get("status") == "completed":
+        raise HTTPException(status_code=400, detail="Already completed")
+    new_progress = min(payload.progress, g["target"])
+    completed = new_progress >= g["target"]
+    updates = {"progress": new_progress}
+    xp_awarded = None
+    if completed:
+        updates["status"] = "completed"
+        updates["completed_at"] = _iso(datetime.now(timezone.utc))
+        xp_awarded = await award_xp(user["user_id"], int(g.get("xp_reward", 0)), f"goal:{gid}")
+    await db.goals.update_one({"goal_id": gid}, {"$set": updates})
+    updated = await db.goals.find_one({"goal_id": gid}, {"_id": 0})
+    return {"goal": updated, "xp": xp_awarded}
+
+
+@api.delete("/goals/{gid}")
+async def delete_goal(gid: str, request: Request):
+    user = await get_current_user(request, db)
+    r = await db.goals.delete_one({"goal_id": gid, "user_id": user["user_id"]})
+    if r.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Goal not found")
+    return {"ok": True}
+
+
 @api.get("/")
 async def root():
     return {"message": "Spartans Growth League API", "version": "1.0"}
@@ -2137,6 +2826,8 @@ async def seed_admin_and_indexes():
     await db.rewards.create_index([("active", 1), ("cost_xp", 1)])
     await db.redemptions.create_index("redemption_id", unique=True)
     await db.redemptions.create_index([("user_id", 1), ("created_at", -1)])
+    await db.goals.create_index([("user_id", 1), ("created_at", -1)])
+    await db.goals.create_index("goal_id", unique=True)
     await db.challenges.create_index([("start_date", 1), ("end_date", 1)])
     await db.challenge_progress.create_index([("user_id", 1), ("challenge_id", 1)], unique=True)
     await db.xp_events.create_index([("user_id", 1), ("created_at", -1)])

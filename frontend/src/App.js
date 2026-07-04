@@ -21,7 +21,9 @@ import WeeklyAttendance from "@/pages/WeeklyAttendance";
 import Seasons from "@/pages/Seasons";
 import Tasks from "@/pages/Tasks";
 import TeamLeague from "@/pages/TeamLeague";
+import SpartansLeague from "@/pages/SpartansLeague";
 import Rewards from "@/pages/Rewards";
+import Goals from "@/pages/Goals";
 import "@/App.css";
 
 function Router() {
@@ -163,10 +165,26 @@ function Router() {
                 }
             />
             <Route
+                path="/spartans-league"
+                element={
+                    <ProtectedRoute>
+                        <AppLayout><SpartansLeague /></AppLayout>
+                    </ProtectedRoute>
+                }
+            />
+            <Route
                 path="/rewards"
                 element={
                     <ProtectedRoute>
                         <AppLayout><Rewards /></AppLayout>
+                    </ProtectedRoute>
+                }
+            />
+            <Route
+                path="/goals"
+                element={
+                    <ProtectedRoute>
+                        <AppLayout><Goals /></AppLayout>
                     </ProtectedRoute>
                 }
             />

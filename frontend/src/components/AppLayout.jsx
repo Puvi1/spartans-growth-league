@@ -2,7 +2,7 @@ import { Link, NavLink, useNavigate } from "react-router-dom";
 import {
     House, Target, Phone, Trophy, User, ChartLine,
     Sword, SignOut, ShieldStar, Calendar, Fire,
-    Users, UsersThree, ChartBar, Crosshair, CalendarCheck, ClipboardText, MedalMilitary, GameController, Gift,
+    Users, UsersThree, ChartBar, Crosshair, CalendarCheck, ClipboardText, MedalMilitary, GameController, Gift, Flag,
 } from "@phosphor-icons/react";
 import { useAuth } from "@/context/AuthContext";
 import { motion } from "framer-motion";
@@ -13,8 +13,8 @@ const BASE_NAV = [
     { to: "/weekly-attendance", icon: CalendarCheck, label: "Attendance", testId: "nav-weekly" },
     { to: "/seasons", icon: MedalMilitary, label: "Seasons", testId: "nav-seasons", requiresSeasonAccess: true },
     { to: "/tasks", icon: ClipboardText, label: "Tasks", testId: "nav-tasks" },
-    { to: "/team-league", icon: GameController, label: "Team League", testId: "nav-team-league" },
-    { to: "/leaderboard", icon: Trophy, label: "League", testId: "nav-leaderboard" },
+    { to: "/goals", icon: Flag, label: "Goals", testId: "nav-goals" },
+    { to: "/spartans-league", icon: Trophy, label: "Spartans League", testId: "nav-league" },
     { to: "/rewards", icon: Gift, label: "Rewards", testId: "nav-rewards" },
     { to: "/prospects", icon: Target, label: "Prospects", testId: "nav-prospects" },
     { to: "/followups", icon: Phone, label: "Follow-Ups", testId: "nav-followups" },

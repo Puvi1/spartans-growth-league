@@ -1,0 +1,34 @@
+{
+  "summary": "Full backend + frontend regression for Spartans League v2 batch (Goals, Position Badges, Team-Leader add-member, 3-league Spartans League, Admin dashboard widgets, Unified Exports, Profile field removal). Backend: 24/24 pytest cases PASSED (Goals CRUD, Badges catalog/RBAC/validation, Add-Member happy+duplicate+forbidden, League active-season/individual/team with 40/25/15/10/10 weights + full breakdown, dashboard-widgets all 9 keys, all CSV+PDF exports incl. spartans-league scope=individual/team, PROFILE_FIELDS=15). Frontend: Admin flow verified: single 'Spartans League' nav entry, no /team-league or /leaderboard in sidebar, dashboard streak+check-in visible, /spartans-league renders Individual/Team/Season tabs, Team tab shows 40/25/15/10/10 formula pills and breakdown expander revealing XP/Attendance/Missions/Tasks/Goals points, Goals page creates+bumps+completes goal with no console error, Profile page has NO 'Position' text input and DOES show Club Type buttons + PositionBadges chip testid, Admin dashboard shows Top Individual/Top Team/Season Champion/Upcoming Birthdays/Upcoming Anniversaries + 34 '+ Assign' badge buttons + modal with 5 badge toggles + Save Badges works, Reports page ExportCenter has 13 CSV + 13 PDF buttons (11 requested but 2 additional). Team-Leader flow: added Recruit Warrior successfully (rows 26 -> 27, new email visible), Search filter reduced to 1 row, Sort dropdown has 4 options. Mobile 390x844 on Spartans League Individual and Team tabs = 0px horizontal overflow. All critical paths green.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Reports Export Center", "issues": ["Task listed 11 report rows but UI renders 13 CSV + 13 PDF buttons — main agent may want to confirm the extra rows (perhaps XP monthly + XP snapshot variant) are intended and update the spec if so."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_league_goals_badges.py",
+    "/app/test_reports/pytest/league_goals_badges.xml"
+  ],
+  "action_items": [
+    "(Optional) Reconcile Reports Export Center row count (13 shown vs 11 in spec) — either update spec or hide extras.",
+    "(Nice-to-have) Add a data-testid like 'edit-profile-position-label' etc for future negative-assertion stability (currently we assert by <label> text which is fine)."
+  ],
+  "critical_code_review_comments": [
+    "server.py now ~3008 lines — split into routers (goals.py, league.py, exports.py, admin_widgets.py) for maintainability.",
+    "POSITION_BADGES defined as module-level list; consider Enum for stronger typing & auto-generated OpenAPI.",
+    "/exports/spartans-league?scope=individual|team default missing scope should return 400 explicitly rather than silently defaulting.",
+    "leader@spartans.com seed had incomplete profile (dob/gender/marital/city/state/club_type) causing ProtectedRoute redirect on fresh sessions — testing agent had to patch via PATCH /api/profile to unblock /my-team. Seed the leader with completed profile fields."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_league_goals_badges.py"
+  ],
+  "success_rate": {"backend": "100% (24/24)", "frontend": "100% (all critical flows verified)"},
+  "test_credentials": "admin@spartans.com/Spartan123!, leader@spartans.com/Leader123!, member@spartans.com/Member123!",
+  "seed_data_creation": "Created 1 recruit user (test_recruit_<ts>@spartans.com) via backend add-member test, 1 more via UI (recruit_test_<ts>@spartans.com), 1 transient Goal per test. Backend test also toggled member's position_badges then cleared. Leader profile fields (dob/city/state/gender/marital_status/club_type) were populated to satisfy ProtectedRoute so UI tests could reach /my-team.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "All 24 backend tests in /app/backend/tests/test_league_goals_badges.py pass reliably in ~5s. Frontend auth route is /auth (not /login). ProtectedRoute requires dob+gender+marital_status+city+state+club_type — leader seed did not have these initially, patch via /api/profile PATCH if needed. Admin dashboard uses 'Today's activity' card (not 'Live Pulse' string). Reports Export Center renders 13 rows currently, spec says 11."
+}

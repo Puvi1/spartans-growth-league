@@ -23,25 +23,31 @@ function download(url) {
         .catch(() => alert("Export failed"));
 }
 
-function ExportBar({ scope }) {
-    // scope options: 'daily','weekly','attendance','xp','team-performance'
+function ExportBar({ scope, label }) {
+    // scope options: 'daily','weekly','attendance','xp','team-performance','missions','tasks','goals','followups','league-individual','league-team'
     const map = {
         daily: `/api/exports/daily`,
         weekly: `/api/exports/xp-leaderboard?scope=weekly`,
         attendance: `/api/exports/attendance`,
         xp: `/api/exports/xp-leaderboard?scope=all`,
         "team-performance": `/api/exports/team-performance`,
+        missions: `/api/exports/missions`,
+        tasks: `/api/exports/tasks`,
+        goals: `/api/exports/goals`,
+        followups: `/api/exports/followups`,
+        "league-individual": `/api/exports/spartans-league?scope=individual`,
+        "league-team": `/api/exports/spartans-league?scope=team`,
     };
     const url = BACKEND_URL + map[scope];
     return (
         <div className="flex items-center gap-2" data-testid={`export-bar-${scope}`}>
-            <span className="text-[10px] uppercase tracking-widest text-zinc-500">Export</span>
+            {label && <span className="text-[10px] uppercase tracking-widest text-zinc-500">{label}</span>}
             <button
                 onClick={() => download(url + (url.includes("?") ? "&" : "?") + "format=csv")}
                 className="btn-glass py-2 px-3 text-xs"
                 data-testid={`export-csv-${scope}`}
             >
-                <FileCsv size={14} weight="duotone" /> Excel/CSV
+                <FileCsv size={14} weight="duotone" /> CSV
             </button>
             <button
                 onClick={() => download(url + (url.includes("?") ? "&" : "?") + "format=pdf")}
@@ -51,6 +57,41 @@ function ExportBar({ scope }) {
                 <FilePdf size={14} weight="duotone" /> PDF
             </button>
         </div>
+    );
+}
+
+function ExportCenter() {
+    const rows = [
+        { scope: "missions", label: "Missions" },
+        { scope: "tasks", label: "Tasks" },
+        { scope: "goals", label: "Goals" },
+        { scope: "followups", label: "Follow-Ups" },
+        { scope: "attendance", label: "Attendance (latest season)" },
+        { scope: "league-individual", label: "Spartans League — Individual" },
+        { scope: "league-team", label: "Spartans League — Team" },
+        { scope: "team-performance", label: "Team Performance" },
+        { scope: "xp", label: "XP Leaderboard (all-time)" },
+        { scope: "weekly", label: "XP Leaderboard (weekly)" },
+        { scope: "daily", label: "Daily XP Snapshot" },
+    ];
+    return (
+        <section className="glass p-5" data-testid="export-center">
+            <div className="flex items-center gap-2 mb-4">
+                <FilePdf size={20} weight="duotone" className="text-yellow-400" />
+                <div>
+                    <div className="heading-eyebrow">Command exports</div>
+                    <h3 className="font-display font-bold text-lg mt-0.5">Report Export Center</h3>
+                </div>
+            </div>
+            <div className="divide-y divide-white/5">
+                {rows.map((r) => (
+                    <div key={r.scope} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 py-3">
+                        <div className="text-sm font-semibold">{r.label}</div>
+                        <ExportBar scope={r.scope} />
+                    </div>
+                ))}
+            </div>
+        </section>
     );
 }
 
@@ -99,6 +140,8 @@ export default function Reports() {
             {tab === "me" && me && <PersonalReport data={me} />}
             {tab === "team" && canTeam && <TeamReport initialData={team} isSuperAdmin={user.role === "super_admin"} />}
             {tab === "global" && global && <GlobalReport data={global} />}
+
+            {canTeam && <ExportCenter />}
         </div>
     );
 }

@@ -14,6 +14,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
 import CelebrationBanner from "@/components/CelebrationBanner";
+import PositionBadges from "@/components/PositionBadges";
 
 export default function Dashboard() {
     const { user, refreshUser } = useAuth();
@@ -74,6 +75,7 @@ export default function Dashboard() {
 
     return (
         <div className="space-y-6 lg:space-y-8" data-testid="dashboard-page">
+            <CelebrationBanner />
             {/* Hero */}
             <section className="glass-strong p-6 md:p-8 relative overflow-hidden">
                 <div className="absolute -top-16 -right-16 w-64 h-64 bg-yellow-500/10 rounded-full blur-3xl pointer-events-none" />
@@ -89,6 +91,11 @@ export default function Dashboard() {
                             <p className="mt-3 text-zinc-400 max-w-lg">
                                 Every check-in forges discipline. Every prospect fuels the empire.
                             </p>
+                            {user?.position_badges?.length > 0 && (
+                                <div className="mt-3">
+                                    <PositionBadges badges={user.position_badges} />
+                                </div>
+                            )}
                         </div>
                         <StreakBadge streak={stats.streak_current} longest={stats.streak_longest} />
                     </div>

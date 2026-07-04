@@ -8,6 +8,7 @@ import { ShieldStar, Sword, Trophy, Fire, LockKey, Sparkle, PencilSimple, Check,
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { fireBigConfetti } from "@/lib/confetti";
+import PositionBadges from "@/components/PositionBadges";
 
 export default function Profile() {
     const { user, refreshUser } = useAuth();
@@ -49,7 +50,6 @@ export default function Profile() {
                 state: user.state || "",
                 joining_date: user.joining_date || "",
                 club_type: user.club_type || "",
-                position: user.position || "",
                 favourite_food: user.favourite_food || "",
                 favourite_place: user.favourite_place || "",
                 favourite_hobby: user.favourite_hobby || "",
@@ -89,7 +89,7 @@ export default function Profile() {
     const missingLabels = {
         avatar_url: "Avatar", team_id: "Team", phone: "Phone", bio: "Bio",
         dob: "Date of Birth", gender: "Gender", marital_status: "Marital status",
-        city: "City", state: "State", club_type: "Club Type", position: "Position",
+        city: "City", state: "State", club_type: "Club Type",
         favourite_food: "Fav. Food", favourite_place: "Fav. Place", favourite_hobby: "Fav. Hobby",
     };
     const locked = badges.filter((b) => !b.unlocked);
@@ -154,7 +154,10 @@ export default function Profile() {
                             {user.name}
                         </h1>
                         <div className="text-zinc-500 mt-2">{user.email}</div>
-                        <div className="mt-3 chip-blue inline-flex">Team {user.team || "Unassigned"}</div>
+                        <div className="mt-3 flex items-center gap-2 flex-wrap justify-center md:justify-start">
+                            <span className="chip-blue">Team {user.team || "Unassigned"}</span>
+                            <PositionBadges badges={user.position_badges || []} size="sm" />
+                        </div>
 
                         <div className="mt-6 max-w-md mx-auto md:mx-0">
                             <XPBar xp={stats.xp} current={stats.current_level_xp} next={stats.next_level_xp} level={stats.level} />
@@ -270,14 +273,9 @@ export default function Profile() {
                             </FormSection>
 
                             <FormSection title="Business">
-                                <FormRow>
-                                    <Field label="Joining Date" testId="profile-joining-input">
-                                        <input type="date" value={form.joining_date} onChange={(e)=>setForm({...form, joining_date: e.target.value})} className="field" />
-                                    </Field>
-                                    <Field label="Position" testId="profile-position-input">
-                                        <input placeholder="e.g. Regional Commander" value={form.position} onChange={(e)=>setForm({...form, position: e.target.value})} className="field" />
-                                    </Field>
-                                </FormRow>
+                                <Field label="Joining Date" testId="profile-joining-input">
+                                    <input type="date" value={form.joining_date} onChange={(e)=>setForm({...form, joining_date: e.target.value})} className="field" />
+                                </Field>
                                 <Field label="Club Type" testId="profile-club-input">
                                     <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                                         {["decider", "believer", "converter", "builder"].map((c) => (
@@ -348,7 +346,6 @@ export default function Profile() {
                         {(user.city || user.state) && <DetailRow label="Location" value={[user.city, user.state].filter(Boolean).join(", ")} />}
                         {user.joining_date && <DetailRow label="Joined" value={user.joining_date} />}
                         {user.club_type && <DetailRow label="Club Type" value={user.club_type} chip="chip-gold" />}
-                        {user.position && <DetailRow label="Position" value={user.position} />}
                         {user.favourite_food && <DetailRow label="Fav. Food" value={user.favourite_food} />}
                         {user.favourite_place && <DetailRow label="Fav. Place" value={user.favourite_place} />}
                         {user.favourite_hobby && <DetailRow label="Fav. Hobby" value={user.favourite_hobby} />}
