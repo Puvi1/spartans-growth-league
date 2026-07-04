@@ -1,0 +1,34 @@
+{
+  "summary": "Feb 2026 massive refactor tested end-to-end. Backend: 39/39 pytest cases PASSED covering Auth+Nexus (register 422 on empty nexus, persistence, admin login returns nexus_id), Object Storage (non-image 400, oversize 400, valid upload + /api/files/<id>?auth=<token> returns image content-type), Attendance gating (future hidden for member, visible for admin, mark future/past 403), Admin User CRUD (member 401/403, admin PATCH name works, cannot delete self), Teams CRUD (create/rename/delete, block delete when members exist), Season PV/Earnings (SeasonIn+PATCH+per-user business + business-totals aggregate), Season History (finalize + list + get snapshot), Follow-up time_slot persistence, Notifications shape (all 7 required keys), League enrichment (individual has club_type/nexus_id/avatar_url/position_badges; team has leader_name/leader_avatar_url/leader_badges/mission_pct), Profile nexus_id PATCH, /prospects /followups /missions /tasks /event-attendance/week /goals /challenges /rewards /seasons /notifications regression, and finally wipe-demo-data (verified only super_admin remains). Frontend: /auth register mode shows 'BUSINESS CENTRE REQUIRED' notice, data-testid=auth-nexus-input positioned BEFORE name input (idx 0 vs 1). Sidebar+mobile nav label = 'Daily Missions', Missions h1 = 'Daily Missions'. notification-bell present in sidebar footer (2 occurrences = desktop+mobile), clicking opens data-testid=notification-panel. Profile: avatar-upload-btn present, header shows 'NEXUS · BC-ADMIN-001', anniversary photo URL + avatar URL text inputs removed. Follow-ups: pending/overdue/completed tabs all present with correct data-testids. Seasons: create modal has season-pv-input + season-earnings-input. Mobile 390x844: /auth /profile /spartans-league /followups all render with 0px horizontal overflow.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Seasons Create modal", "issues": ["Start/End Date fields use browser-default HTML5 date picker (input type=date) instead of shadcn Calendar component. Per code review guidelines this is a design deviation from other shadcn-based inputs across the app."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_feb2026_refactor.py",
+    "/app/test_reports/pytest/feb2026.xml"
+  ],
+  "action_items": [
+    "(Optional) Replace browser-default <input type=date> in Seasons create modal with shadcn Calendar for UI consistency.",
+    "(Note) After wipe-demo-data ran in tests, only super_admin remains in db.users. leader@spartans.com and member@spartans.com from /app/memory/test_credentials.md no longer exist. Update credentials doc or re-seed if downstream tests depend on them."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now ~3409 lines — should be split into routers (auth.py, admin.py, seasons.py, attendance.py, notifications.py, storage.py) for maintainability.",
+    "In /uploads/avatar, image validation trusts content_type from client only; should also sniff magic bytes to prevent bypass (e.g., renaming .exe as image/png).",
+    "/api/files/{id}?auth=<token> reads JWT from a query string — tokens leak in server logs and browser history. Consider a short-lived signed URL or ETag approach.",
+    "/season/business-totals falls back to sum from user_business only if season.total_pv is 0/null; the current expression `float(season.get('total_pv') or total_pv)` will silently ignore an admin-set 0 value (treating 0 as falsy). Use explicit None check.",
+    "admin_delete_user does not cascade delete related records (goals, prospects, followups, xp_events, event_attendance) — leaves orphans that could bloat exports.",
+    "/notifications 'unread' count double-counts tasks_overdue with tasks_pending? Actually unread = overdue+due_today+goals+tasks_overdue, but tasks_pending is not included. Verify formula intent."
+  ],
+  "updated_files": ["/app/backend/tests/test_feb2026_refactor.py"],
+  "success_rate": {"backend": "100% (39/39)", "frontend": "100% (all critical flows verified)"},
+  "test_credentials": "admin@spartans.com/Spartan123! (super_admin). NOTE: leader@ and member@ seeded credentials no longer exist post-wipe.",
+  "seed_data_creation": "Tests created and cleaned up: 1 registered member user (nexus_test_<ts>@spartans.com), 3 teams (Ares/AresRenamed/HasMembers), 1 season (Q1_<ts>) with PV/earnings + user business row + snapshot, 1 follow-up. All test data wiped by final wipe-demo-data test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend suite: pytest backend/tests/test_feb2026_refactor.py -n 0 -p no:cacheprovider (run serial with -n 0 because the wipe test class deletes all non-admin users). All 39 tests pass in ~7s. Frontend register flow requires clicking 'Enlist now' link (not a tab) to switch from login to register mode. Post-wipe only super_admin remains; League/Team pages will show 1 or 0 rows. Data-testids verified: auth-nexus-input, avatar-upload-btn, notification-bell, notification-panel, followup-tab-{pending,overdue,completed}, season-modal, season-pv-input, season-earnings-input, nav-missions."
+}

@@ -16,7 +16,7 @@ import httpx
 from datetime import datetime, timezone, timedelta, date
 from typing import Optional, List, Literal
 
-from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends
+from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends, UploadFile, File
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, EmailStr, Field, ConfigDict
@@ -107,26 +107,6 @@ class UserPublic(BaseModel):
     created_at: Optional[str] = None
 
 
-class RegisterIn(BaseModel):
-    email: EmailStr
-    password: str = Field(min_length=6)
-    name: str = Field(min_length=1)
-    phone: Optional[str] = None
-    dob: Optional[str] = None
-    gender: Optional[Literal["male", "female", "other", "prefer_not"]] = None
-    city: Optional[str] = None
-    state: Optional[str] = None
-
-    @classmethod
-    def _validate_phone(cls, v):
-        if v is None or v == "":
-            return None
-        s = "".join(ch for ch in str(v) if ch.isdigit())
-        if len(s) != 10:
-            raise ValueError("Mobile number must be exactly 10 digits")
-        return s
-
-
 import re
 from pydantic import field_validator
 
@@ -152,11 +132,12 @@ def _reject_future_date(v):
     return v
 
 
-# Rebind RegisterIn with validators
+# RegisterIn model with validators
 class RegisterIn(BaseModel):
     email: EmailStr
     password: str = Field(min_length=6)
     name: str = Field(min_length=1)
+    nexus_id: str = Field(min_length=3, max_length=40)
     phone: Optional[str] = None
     dob: Optional[str] = None
     gender: Optional[Literal["male", "female", "other", "prefer_not"]] = None
@@ -172,6 +153,14 @@ class RegisterIn(BaseModel):
     @classmethod
     def v_dob(cls, v):
         return _reject_future_date(v)
+
+    @field_validator("nexus_id")
+    @classmethod
+    def v_nexus_id(cls, v):
+        s = str(v).strip()
+        if len(s) < 3:
+            raise ValueError("Nexus ID (Business Centre) must be at least 3 characters")
+        return s
 
 
 class LoginIn(BaseModel):
@@ -199,9 +188,13 @@ class ProspectUpdate(BaseModel):
     source: Optional[str] = None
 
 
+FOLLOWUP_TIME_SLOTS = ["8-10am", "10-12pm", "2-4pm", "6-8pm"]
+
+
 class FollowUpIn(BaseModel):
     title: str
     due_date: str  # ISO date
+    time_slot: Optional[Literal["8-10am", "10-12pm", "2-4pm", "6-8pm"]] = None
     prospect_id: Optional[str] = None
     notes: Optional[str] = None
 
@@ -210,6 +203,7 @@ class FollowUpUpdate(BaseModel):
     status: Optional[Literal["pending", "done"]] = None
     title: Optional[str] = None
     due_date: Optional[str] = None
+    time_slot: Optional[Literal["8-10am", "10-12pm", "2-4pm", "6-8pm"]] = None
     notes: Optional[str] = None
 
 
@@ -263,6 +257,24 @@ class SeasonIn(BaseModel):
     start_date: str  # YYYY-MM-DD
     end_date: str
     is_believer: bool = False
+    total_pv: Optional[float] = Field(default=None, ge=0)
+    total_earnings: Optional[float] = Field(default=None, ge=0)
+
+
+class SeasonUpdate(BaseModel):
+    name: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    is_believer: Optional[bool] = None
+    total_pv: Optional[float] = Field(default=None, ge=0)
+    total_earnings: Optional[float] = Field(default=None, ge=0)
+
+
+class UserBusinessUpdate(BaseModel):
+    """Super Admin can set per-user PV/Earnings for a season."""
+    season_id: str
+    pv: Optional[float] = Field(default=None, ge=0)
+    earnings: Optional[float] = Field(default=None, ge=0)
 
 
 class TaskIn(BaseModel):
@@ -308,6 +320,7 @@ class ProfileUpdate(BaseModel):
     anniversary_photo: Optional[str] = None  # base64 data URL
     avatar_url: Optional[str] = None
     avatar_photo: Optional[str] = None  # base64 alternative
+    nexus_id: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None
     # Business
@@ -517,6 +530,7 @@ async def register(payload: RegisterIn, response: Response):
         "role": "member",
         "avatar_url": None,
         "picture": None,
+        "nexus_id": payload.nexus_id.strip(),
         "xp": 0,
         "level": 1,
         "streak_current": 0,
@@ -1637,16 +1651,25 @@ async def delete_weekly_event(event_id: str, request: Request):
 # --- Event Attendance ---
 @api.get("/event-attendance/week")
 async def week_attendance(request: Request, week_of: Optional[str] = None):
-    """Returns this week's events with the current user's marks."""
+    """Returns this week's events with the current user's marks.
+
+    Rules (Feb 2026 refactor):
+    - Members: future meetings (event_date > today) are HIDDEN.
+    - Super admin: all occurrences returned for history/audit (including future).
+    """
     user = await get_current_user(request, db)
     anchor = date.fromisoformat(week_of) if week_of else date.today()
+    today = date.today()
     week_dates = _dates_for_week(anchor)
     events = await db.weekly_events.find({"active": True}, {"_id": 0}).sort("weekday", 1).to_list(100)
-    # Build occurrences: for each event, use week_dates[weekday]
+    is_admin = user["role"] == "super_admin"
     occurrences = []
     for e in events:
         occ_date = week_dates[e["weekday"]]
         occ_date_str = occ_date.isoformat()
+        # Hide future occurrences from non-admins
+        if not is_admin and occ_date > today:
+            continue
         mark = await db.event_attendance.find_one(
             {"user_id": user["user_id"], "event_id": e["event_id"], "event_date": occ_date_str},
             {"_id": 0},
@@ -1660,6 +1683,8 @@ async def week_attendance(request: Request, week_of: Optional[str] = None):
             "event_date": occ_date_str,
             "status": mark["status"] if mark else None,
             "locked": _is_locked(occ_date_str),
+            "is_future": occ_date > today,
+            "is_today": occ_date == today,
             "marked_at": mark.get("updated_at") if mark else None,
         })
     return {
@@ -1672,6 +1697,16 @@ async def week_attendance(request: Request, week_of: Optional[str] = None):
 @api.post("/event-attendance/mark")
 async def mark_attendance(payload: EventAttendanceMark, request: Request):
     user = await get_current_user(request, db)
+    # Only allow marking on the exact meeting day. Future dates are blocked; past dates are locked.
+    try:
+        ev_date = date.fromisoformat(payload.event_date)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid event_date")
+    today = date.today()
+    if ev_date > today:
+        raise HTTPException(status_code=403, detail="Cannot mark attendance for a future meeting")
+    if ev_date < today:
+        raise HTTPException(status_code=403, detail="Past meeting attendance is locked (read-only history)")
     if _is_locked(payload.event_date):
         raise HTTPException(status_code=403, detail=f"Attendance locked. Cutoff is {LOCK_HOUR}:00 IST on {payload.event_date}.")
     # Validate event exists
@@ -2120,6 +2155,8 @@ async def spartans_individual(request: Request, season_id: Optional[str] = None,
                 "team": u.get("team"), "level": u.get("level", 1),
                 "streak_current": u.get("streak_current", 0),
                 "position_badges": u.get("position_badges", []),
+                "club_type": u.get("club_type"),
+                "nexus_id": u.get("nexus_id"),
                 "xp": stats["xp"], "missions": stats["missions"], "tasks": stats["tasks"],
                 "goals": stats["goals"], "attendance_pct": att_pct,
                 "score": round(score, 1),
@@ -2133,6 +2170,8 @@ async def spartans_individual(request: Request, season_id: Optional[str] = None,
                 "team": u.get("team"), "level": u.get("level", 1),
                 "streak_current": u.get("streak_current", 0),
                 "position_badges": u.get("position_badges", []),
+                "club_type": u.get("club_type"),
+                "nexus_id": u.get("nexus_id"),
                 "xp": u.get("xp", 0), "missions": 0, "tasks": 0, "goals": 0,
                 "attendance_pct": 0.0, "score": u.get("xp", 0),
             })
@@ -2195,7 +2234,17 @@ async def spartans_team_league(request: Request, season_id: Optional[str] = None
             "team_id": t["team_id"], "name": t["name"], "members": len(members),
             "xp": xp, "missions": missions, "tasks": tasks, "goals": goals,
             "attendance_pct": att, "leader_id": t.get("leader_id"),
+            "leader_name": None, "leader_avatar_url": None, "leader_badges": [],
+            "mission_pct": min(100, round((missions / max(1, len(members) * 20)) * 100, 1)),
         })
+    # Attach leader info
+    for r in raw:
+        if r.get("leader_id"):
+            lu = await db.users.find_one({"user_id": r["leader_id"]}, {"_id": 0, "name": 1, "avatar_url": 1, "picture": 1, "position_badges": 1})
+            if lu:
+                r["leader_name"] = lu.get("name")
+                r["leader_avatar_url"] = lu.get("avatar_url") or lu.get("picture")
+                r["leader_badges"] = lu.get("position_badges", [])
     # Normalize each metric to 0..100 relative to max
     max_xp = max((r["xp"] for r in raw), default=0) or 1
     max_mis = max((r["missions"] for r in raw), default=0) or 1
@@ -2727,6 +2776,431 @@ async def leader_add_member(payload: AddMemberIn, request: Request):
     return {"ok": True, "user": _clean(doc)}
 
 
+# ---------- Object Storage (Profile Photo Upload) ----------
+import requests as _requests
+
+STORAGE_URL = "https://integrations.emergentagent.com/objstore/api/v1/storage"
+STORAGE_APP_NAME = "spartans-growth-league"
+_storage_state = {"key": None}
+
+
+def _init_storage():
+    if _storage_state["key"]:
+        return _storage_state["key"]
+    key = os.environ.get("EMERGENT_LLM_KEY")
+    if not key:
+        raise HTTPException(status_code=500, detail="Object storage not configured (EMERGENT_LLM_KEY missing)")
+    resp = _requests.post(f"{STORAGE_URL}/init", json={"emergent_key": key}, timeout=30)
+    resp.raise_for_status()
+    _storage_state["key"] = resp.json()["storage_key"]
+    return _storage_state["key"]
+
+
+def _put_object(path: str, data: bytes, content_type: str) -> dict:
+    key = _init_storage()
+    r = _requests.put(f"{STORAGE_URL}/objects/{path}",
+                      headers={"X-Storage-Key": key, "Content-Type": content_type},
+                      data=data, timeout=120)
+    if r.status_code == 403:
+        _storage_state["key"] = None
+        key = _init_storage()
+        r = _requests.put(f"{STORAGE_URL}/objects/{path}",
+                          headers={"X-Storage-Key": key, "Content-Type": content_type},
+                          data=data, timeout=120)
+    r.raise_for_status()
+    return r.json()
+
+
+def _get_object(path: str):
+    key = _init_storage()
+    r = _requests.get(f"{STORAGE_URL}/objects/{path}",
+                      headers={"X-Storage-Key": key}, timeout=60)
+    if r.status_code == 403:
+        _storage_state["key"] = None
+        key = _init_storage()
+        r = _requests.get(f"{STORAGE_URL}/objects/{path}",
+                          headers={"X-Storage-Key": key}, timeout=60)
+    r.raise_for_status()
+    return r.content, r.headers.get("Content-Type", "application/octet-stream")
+
+
+IMAGE_MIME = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+IMAGE_EXT = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif"}
+MAX_IMAGE_BYTES = 2 * 1024 * 1024  # 2 MB
+
+
+@api.post("/uploads/avatar")
+async def upload_avatar(request: Request, file: UploadFile = File(...)):
+    user = await get_current_user(request, db)
+    ctype = (file.content_type or "").lower()
+    if ctype not in IMAGE_MIME:
+        raise HTTPException(status_code=400, detail="Only image files (jpg, png, webp, gif) allowed")
+    data = await file.read()
+    if len(data) > MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=400, detail="Image must be under 2 MB")
+    ext = IMAGE_EXT[ctype]
+    path = f"{STORAGE_APP_NAME}/avatars/{user['user_id']}/{uuid.uuid4()}.{ext}"
+    result = _put_object(path, data, ctype)
+    stored = result.get("path", path)
+    file_id = str(uuid.uuid4())
+    await db.files.insert_one({
+        "file_id": file_id, "storage_path": stored, "user_id": user["user_id"],
+        "purpose": "avatar", "content_type": ctype, "size": len(data),
+        "is_deleted": False, "created_at": _iso(datetime.now(timezone.utc)),
+    })
+    # Update user profile
+    avatar_url = f"/api/files/{file_id}"
+    await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"avatar_url": avatar_url}})
+    return {"file_id": file_id, "url": avatar_url, "storage_path": stored, "size": len(data)}
+
+
+@api.get("/files/{file_id}")
+async def download_file(file_id: str, request: Request, auth: Optional[str] = None):
+    # Support ?auth=<token> because <img> tags cannot pass Authorization headers.
+    if auth:
+        try:
+            claims = jwt.decode(auth, get_jwt_secret(), algorithms=["HS256"])
+            _ = claims["sub"]
+        except Exception:
+            raise HTTPException(status_code=401, detail="Invalid token")
+    else:
+        await get_current_user(request, db)
+    rec = await db.files.find_one({"file_id": file_id, "is_deleted": False}, {"_id": 0})
+    if not rec:
+        raise HTTPException(status_code=404, detail="File not found")
+    data, ctype = _get_object(rec["storage_path"])
+    return Response(content=data, media_type=rec.get("content_type") or ctype)
+
+
+# ---------- Admin User Management ----------
+class AdminUserUpdate(BaseModel):
+    name: Optional[str] = None
+    team_id: Optional[str] = None  # empty string = unassign
+    role: Optional[Literal["member", "team_leader", "super_admin"]] = None
+
+
+@api.patch("/admin/users/{uid}")
+async def admin_edit_user(uid: str, payload: AdminUserUpdate, request: Request):
+    user = await get_current_user(request, db)
+    require_role(user, ["super_admin"])
+    target = await db.users.find_one({"user_id": uid}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    updates = {}
+    if payload.name is not None:
+        updates["name"] = payload.name.strip()
+    if payload.team_id is not None:
+        if payload.team_id == "":
+            updates["team_id"] = None
+            updates["team"] = None
+        else:
+            team = await db.teams.find_one({"team_id": payload.team_id}, {"_id": 0})
+            if not team:
+                raise HTTPException(status_code=404, detail="Team not found")
+            updates["team_id"] = team["team_id"]
+            updates["team"] = team["name"]
+    if payload.role is not None:
+        updates["role"] = payload.role
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    await db.users.update_one({"user_id": uid}, {"$set": updates})
+    # If demoting away from team_leader, unassign leadership
+    if payload.role and payload.role != "team_leader":
+        await db.teams.update_many({"leader_id": uid}, {"$set": {"leader_id": None}})
+    return {"ok": True}
+
+
+@api.delete("/admin/users/{uid}")
+async def admin_delete_user(uid: str, request: Request):
+    user = await get_current_user(request, db)
+    require_role(user, ["super_admin"])
+    if uid == user["user_id"]:
+        raise HTTPException(status_code=400, detail="Cannot delete yourself")
+    target = await db.users.find_one({"user_id": uid}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target.get("role") == "super_admin":
+        raise HTTPException(status_code=400, detail="Cannot delete another super admin")
+    await db.users.delete_one({"user_id": uid})
+    await db.teams.update_many({"leader_id": uid}, {"$set": {"leader_id": None}})
+    return {"ok": True}
+
+
+class TeamIn(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    leader_id: Optional[str] = None
+
+
+class TeamUpdate(BaseModel):
+    name: Optional[str] = None
+    leader_id: Optional[str] = None
+
+
+@api.post("/admin/teams")
+async def admin_create_team(payload: TeamIn, request: Request):
+    user = await get_current_user(request, db)
+    require_role(user, ["super_admin"])
+    existing = await db.teams.find_one({"name": payload.name.strip()})
+    if existing:
+        raise HTTPException(status_code=400, detail="A team with that name already exists")
+    tid = str(uuid.uuid4())
+    doc = {"team_id": tid, "name": payload.name.strip(),
+           "leader_id": payload.leader_id, "created_at": _iso(datetime.now(timezone.utc))}
+    await db.teams.insert_one(doc)
+    if payload.leader_id:
+        await db.users.update_one({"user_id": payload.leader_id},
+                                  {"$set": {"role": "team_leader", "team_id": tid, "team": doc["name"]}})
+    return _clean(doc)
+
+
+@api.patch("/admin/teams/{team_id}")
+async def admin_update_team(team_id: str, payload: TeamUpdate, request: Request):
+    user = await get_current_user(request, db)
+    require_role(user, ["super_admin"])
+    team = await db.teams.find_one({"team_id": team_id}, {"_id": 0})
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+    updates = {}
+    if payload.name is not None:
+        updates["name"] = payload.name.strip()
+    if payload.leader_id is not None:
+        # Set new leader; ensure they exist
+        if payload.leader_id == "":
+            updates["leader_id"] = None
+        else:
+            u = await db.users.find_one({"user_id": payload.leader_id}, {"_id": 0})
+            if not u:
+                raise HTTPException(status_code=404, detail="Leader user not found")
+            # Remove leader flag from previous leader
+            if team.get("leader_id") and team["leader_id"] != payload.leader_id:
+                await db.users.update_one({"user_id": team["leader_id"]},
+                                          {"$set": {"role": "member"}})
+            updates["leader_id"] = payload.leader_id
+            await db.users.update_one({"user_id": payload.leader_id},
+                                      {"$set": {"role": "team_leader", "team_id": team_id,
+                                                "team": updates.get("name") or team["name"]}})
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    await db.teams.update_one({"team_id": team_id}, {"$set": updates})
+    # Cascade name change to member records
+    if "name" in updates:
+        await db.users.update_many({"team_id": team_id}, {"$set": {"team": updates["name"]}})
+    return {"ok": True}
+
+
+@api.delete("/admin/teams/{team_id}")
+async def admin_delete_team(team_id: str, request: Request):
+    user = await get_current_user(request, db)
+    require_role(user, ["super_admin"])
+    team = await db.teams.find_one({"team_id": team_id}, {"_id": 0})
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+    n_members = await db.users.count_documents({"team_id": team_id})
+    if n_members > 0:
+        raise HTTPException(status_code=400, detail=f"Team has {n_members} members; move them first")
+    await db.teams.delete_one({"team_id": team_id})
+    return {"ok": True}
+
+
+# ---------- Business Volume (PV) & Earnings ----------
+@api.patch("/admin/seasons/{season_id}")
+async def admin_update_season(season_id: str, payload: SeasonUpdate, request: Request):
+    user = await get_current_user(request, db)
+    require_role(user, ["super_admin"])
+    updates = {k: v for k, v in payload.model_dump(exclude_unset=True).items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    r = await db.seasons.update_one({"season_id": season_id}, {"$set": updates})
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Season not found")
+    return {"ok": True}
+
+
+@api.post("/admin/users/{uid}/business")
+async def admin_set_user_business(uid: str, payload: UserBusinessUpdate, request: Request):
+    """Set a user's PV & Earnings for a specific season."""
+    user = await get_current_user(request, db)
+    require_role(user, ["super_admin"])
+    if not await db.users.find_one({"user_id": uid}, {"_id": 0, "user_id": 1}):
+        raise HTTPException(status_code=404, detail="User not found")
+    if not await db.seasons.find_one({"season_id": payload.season_id}, {"_id": 0, "season_id": 1}):
+        raise HTTPException(status_code=404, detail="Season not found")
+    key = {"user_id": uid, "season_id": payload.season_id}
+    now = _iso(datetime.now(timezone.utc))
+    updates = {k: v for k, v in {"pv": payload.pv, "earnings": payload.earnings}.items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="Provide pv or earnings")
+    await db.user_business.update_one(
+        key,
+        {"$set": {**key, **updates, "updated_at": now},
+         "$setOnInsert": {"created_at": now}},
+        upsert=True,
+    )
+    return {"ok": True}
+
+
+@api.get("/admin/users/{uid}/business")
+async def admin_get_user_business(uid: str, request: Request, season_id: Optional[str] = None):
+    user = await get_current_user(request, db)
+    require_role(user, ["super_admin", "team_leader"])
+    q = {"user_id": uid}
+    if season_id:
+        q["season_id"] = season_id
+    items = await db.user_business.find(q, {"_id": 0}).sort("created_at", -1).to_list(200)
+    return items
+
+
+@api.delete("/admin/users/{uid}/business/{season_id}")
+async def admin_delete_user_business(uid: str, season_id: str, request: Request):
+    user = await get_current_user(request, db)
+    require_role(user, ["super_admin"])
+    r = await db.user_business.delete_one({"user_id": uid, "season_id": season_id})
+    if r.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    return {"ok": True}
+
+
+@api.get("/season/business-totals")
+async def season_business_totals(request: Request, season_id: Optional[str] = None):
+    """Aggregate PV & Earnings across all members of a season."""
+    await get_current_user(request, db)
+    if season_id:
+        season = await db.seasons.find_one({"season_id": season_id}, {"_id": 0})
+    else:
+        season = await _current_active_season()
+    if not season:
+        return {"season": None, "total_pv": 0.0, "total_earnings": 0.0, "member_count": 0}
+    agg = await db.user_business.aggregate([
+        {"$match": {"season_id": season["season_id"]}},
+        {"$group": {"_id": None, "pv": {"$sum": "$pv"}, "earnings": {"$sum": "$earnings"},
+                    "members": {"$sum": 1}}},
+    ]).to_list(1)
+    total_pv = agg[0]["pv"] if agg else 0.0
+    total_earnings = agg[0]["earnings"] if agg else 0.0
+    return {
+        "season": season,
+        "total_pv": round(float(season.get("total_pv") or total_pv), 2),
+        "total_earnings": round(float(season.get("total_earnings") or total_earnings), 2),
+        "member_count": agg[0]["members"] if agg else 0,
+        "per_member_pv": total_pv,
+        "per_member_earnings": total_earnings,
+    }
+
+
+# ---------- Notifications (in-app) ----------
+@api.get("/notifications")
+async def notifications(request: Request):
+    """Return grouped counts + preview items for the notification bell."""
+    user = await get_current_user(request, db)
+    uid = user["user_id"]
+    today_iso = date.today().isoformat()
+
+    # Overdue followups
+    overdue = await db.followups.find({
+        "user_id": uid, "status": "pending", "due_date": {"$lt": today_iso},
+    }, {"_id": 0}).sort("due_date", 1).to_list(20)
+    # Due today
+    due_today = await db.followups.find({
+        "user_id": uid, "status": "pending", "due_date": today_iso,
+    }, {"_id": 0}).sort("time_slot", 1).to_list(20)
+
+    # Pending Goals nearing period end
+    weekly_start = (date.today() - timedelta(days=date.today().weekday())).isoformat()
+    monthly_start = date.today().replace(day=1).isoformat()
+    pending_weekly = await db.goals.count_documents({
+        "user_id": uid, "status": "active", "period": "weekly", "period_start": weekly_start,
+    })
+    pending_monthly = await db.goals.count_documents({
+        "user_id": uid, "status": "active", "period": "monthly", "period_start": monthly_start,
+    })
+
+    # Tasks pending
+    tasks_pending = await db.tasks.count_documents({
+        "assigned_to": uid, "status": "pending",
+    })
+    tasks_overdue = await db.tasks.count_documents({
+        "assigned_to": uid, "status": "pending", "due_date": {"$lt": today_iso},
+    })
+
+    return {
+        "unread": len(overdue) + len(due_today) + pending_weekly + pending_monthly + tasks_overdue,
+        "followups_overdue": overdue,
+        "followups_due_today": due_today,
+        "goals_pending_weekly": pending_weekly,
+        "goals_pending_monthly": pending_monthly,
+        "tasks_pending": tasks_pending,
+        "tasks_overdue": tasks_overdue,
+    }
+
+
+# ---------- Season History Archive ----------
+@api.post("/admin/seasons/{season_id}/finalize")
+async def admin_finalize_season(season_id: str, request: Request):
+    """Snapshot the individual + team standings of a season for permanent history."""
+    user = await get_current_user(request, db)
+    require_role(user, ["super_admin"])
+    season = await db.seasons.find_one({"season_id": season_id}, {"_id": 0})
+    if not season:
+        raise HTTPException(status_code=404, detail="Season not found")
+    individual = await spartans_individual(request, season_id=season_id, limit=500)
+    team = await spartans_team_league(request, season_id=season_id)
+    business = await db.user_business.find({"season_id": season_id}, {"_id": 0}).to_list(5000)
+    now = _iso(datetime.now(timezone.utc))
+    snapshot = {
+        "snapshot_id": str(uuid.uuid4()),
+        "season_id": season_id, "season": season,
+        "individual_ranking": individual.get("rows", []),
+        "team_ranking": team.get("teams", []),
+        "business_ledger": business,
+        "finalized_at": now,
+        "finalized_by": user["user_id"],
+    }
+    await db.season_snapshots.update_one(
+        {"season_id": season_id}, {"$set": snapshot}, upsert=True,
+    )
+    return {"ok": True, "snapshot_id": snapshot["snapshot_id"]}
+
+
+@api.get("/season-history")
+async def list_season_history(request: Request):
+    await get_current_user(request, db)
+    snaps = await db.season_snapshots.find({}, {"_id": 0}).sort("finalized_at", -1).to_list(50)
+    return snaps
+
+
+@api.get("/season-history/{season_id}")
+async def get_season_snapshot(season_id: str, request: Request):
+    await get_current_user(request, db)
+    snap = await db.season_snapshots.find_one({"season_id": season_id}, {"_id": 0})
+    if not snap:
+        raise HTTPException(status_code=404, detail="No snapshot for this season")
+    return snap
+
+
+@api.post("/admin/wipe-demo-data")
+async def admin_wipe_demo_data(request: Request):
+    """Nuke: prospects, followups, missions, tasks, attendance, xp_events, challenges, rewards, redemptions,
+       goals, user_business, all users except super_admin. Preserves teams, weekly_events, seasons."""
+    user = await get_current_user(request, db)
+    require_role(user, ["super_admin"])
+    collections = ["prospects", "followups", "missions", "tasks", "attendance", "event_attendance",
+                   "xp_events", "challenges", "rewards", "redemptions", "goals", "user_business",
+                   "season_snapshots", "files", "notifications"]
+    results = {}
+    for c in collections:
+        r = await db[c].delete_many({})
+        results[c] = r.deleted_count
+    # Delete all non-admin users
+    r = await db.users.delete_many({"role": {"$ne": "super_admin"}})
+    results["users"] = r.deleted_count
+    # Reset admin's XP & streaks
+    await db.users.update_many({"role": "super_admin"},
+                               {"$set": {"xp": 0, "level": 1, "streak_current": 0,
+                                         "streak_longest": 0, "last_checkin_date": None,
+                                         "badges": [], "position_badges": []}})
+    return {"ok": True, "wiped": results}
+
+
 # ---------- Goals ----------
 def _goal_period_start(period: str) -> str:
     today = date.today()
@@ -2892,86 +3366,17 @@ async def seed_admin_and_indexes():
 
     seed_profile = {
         "phone": "9876543210", "bio": "Forged in discipline.",
-        "dob": "1990-01-15", "gender": "male", "marital_status": "single",
+        "dob": "1985-05-10", "gender": "male", "marital_status": "single",
         "city": "Athens", "state": "Attica", "club_type": "Elite",
         "favourite_food": "Steak", "favourite_place": "Sparta", "favourite_hobby": "Training",
-        "joining_date": "2024-01-01",
+        "joining_date": "2024-01-01", "nexus_id": "BC-ADMIN-001",
     }
-    admin_profile = {**seed_profile, "bio": "Commanding the league.", "dob": "1985-05-10"}
-    leader_profile = {**seed_profile, "bio": "Lead by iron will.", "dob": "1988-03-22", "city": "Thermopylae"}
-    member_profile = {**seed_profile, "bio": "Rising warrior.", "dob": "1995-08-08"}
 
+    # Only super_admin is seeded. All other members created via signup / add-member flows.
     await upsert_seed_user(os.environ.get("ADMIN_EMAIL", "admin@spartans.com"),
                            os.environ.get("ADMIN_PASSWORD", "Spartan123!"),
                            "Spartan Commander", "super_admin", "Command", team_ids["Command"],
-                           extras=admin_profile)
-    await upsert_seed_user("leader@spartans.com", "Leader123!", "Team Leader Leonidas", "team_leader", "Alpha", team_ids["Alpha"],
-                           extras=leader_profile)
-    await upsert_seed_user("member@spartans.com", "Member123!", "Spartan Recruit", "member", "Alpha", team_ids["Alpha"],
-                           extras=member_profile)
-
-    # Assign Alpha leader
-    leader = await db.users.find_one({"email": "leader@spartans.com"}, {"_id": 0})
-    if leader:
-        await db.teams.update_one({"team_id": team_ids["Alpha"]}, {"$set": {"leader_id": leader["user_id"]}})
-
-    # Seed a few demo members if we have very few users
-    users_count = await db.users.count_documents({})
-    if users_count < 10:
-        demo_names = [
-            ("achilles@spartans.com", "Achilles Warrior", "Alpha", 3200, 12, 5),
-            ("hector@spartans.com", "Hector Steel", "Bravo", 2400, 6, 8),
-            ("odysseus@spartans.com", "Odysseus Sharp", "Bravo", 4100, 9, 15),
-            ("ajax@spartans.com", "Ajax Storm", "Alpha", 1800, 4, 3),
-            ("perseus@spartans.com", "Perseus Blade", "Delta", 5600, 21, 20),
-            ("theseus@spartans.com", "Theseus Bold", "Delta", 2900, 7, 6),
-            ("jason@spartans.com", "Jason Vault", "Bravo", 1250, 3, 2),
-        ]
-        for email, name, team, xp, streak, checkins in demo_names:
-            if await db.users.find_one({"email": email}):
-                continue
-            uid = f"user_{uuid.uuid4().hex[:12]}"
-            await db.users.insert_one({
-                "user_id": uid, "email": email, "name": name,
-                "password_hash": hash_password("Demo123!"), "role": "member",
-                "avatar_url": None, "picture": None, "xp": xp, "level": level_from_xp(xp),
-                "streak_current": streak, "streak_longest": streak, "last_checkin_date": None,
-                "team": team, "team_id": team_ids.get(team), "badges": [],
-                "created_at": _iso(datetime.now(timezone.utc)), "active": True,
-            })
-            # Seed some xp events distributed across last month
-            for d in range(checkins):
-                dt = datetime.now(timezone.utc) - timedelta(days=d)
-                await db.xp_events.insert_one({
-                    "event_id": str(uuid.uuid4()), "user_id": uid,
-                    "amount": xp // max(1, checkins), "reason": "seed",
-                    "created_at": _iso(dt),
-                })
-
-    # Seed a couple of demo challenges if empty
-    ch_count = await db.challenges.count_documents({})
-    if ch_count == 0:
-        today = date.today()
-        await db.challenges.insert_many([
-            {"challenge_id": str(uuid.uuid4()),
-             "title": "Weekly Warrior", "description": "Check in 5 days this week to earn massive XP.",
-             "type": "weekly", "goal_type": "checkins", "goal": 5,
-             "start_date": today.isoformat(), "end_date": (today + timedelta(days=7)).isoformat(),
-             "xp_reward": 150, "badge_reward": None,
-             "created_by": "system", "created_at": _iso(datetime.now(timezone.utc))},
-            {"challenge_id": str(uuid.uuid4()),
-             "title": "Prospect Blitz", "description": "Add 10 new prospects this week.",
-             "type": "weekly", "goal_type": "prospects", "goal": 10,
-             "start_date": today.isoformat(), "end_date": (today + timedelta(days=7)).isoformat(),
-             "xp_reward": 200, "badge_reward": None,
-             "created_by": "system", "created_at": _iso(datetime.now(timezone.utc))},
-            {"challenge_id": str(uuid.uuid4()),
-             "title": "Monthly Momentum", "description": "Complete 20 follow-ups in 30 days.",
-             "type": "monthly", "goal_type": "followups", "goal": 20,
-             "start_date": today.isoformat(), "end_date": (today + timedelta(days=30)).isoformat(),
-             "xp_reward": 500, "badge_reward": None,
-             "created_by": "system", "created_at": _iso(datetime.now(timezone.utc))},
-        ])
+                           extras=seed_profile)
 
     # Seed default 3 weekly events (Tue/Thu/Sat) if empty
     we_count = await db.weekly_events.count_documents({})
@@ -2986,33 +3391,6 @@ async def seed_admin_and_indexes():
             {"event_id": str(uuid.uuid4()), "name": "Spartans Team Meeting", "weekday": 5,
              "is_believer": False, "active": True,
              "created_at": _iso(datetime.now(timezone.utc))},
-        ])
-
-    # Seed default reward store
-    rw_count = await db.rewards.count_documents({})
-    if rw_count == 0:
-        now_iso = _iso(datetime.now(timezone.utc))
-        await db.rewards.insert_many([
-            {"reward_id": str(uuid.uuid4()), "name": "Team Dinner Voucher",
-             "description": "Dinner for one at partner restaurant.",
-             "cost_xp": 300, "category": "dinner", "stock": None,
-             "image_url": None, "active": True,
-             "created_by": "system", "created_at": now_iso},
-            {"reward_id": str(uuid.uuid4()), "name": "Movie Ticket",
-             "description": "One movie ticket, any screening.",
-             "cost_xp": 500, "category": "movie", "stock": None,
-             "image_url": None, "active": True,
-             "created_by": "system", "created_at": now_iso},
-            {"reward_id": str(uuid.uuid4()), "name": "Team Outing Pass",
-             "description": "Full-team outing sponsored by leadership.",
-             "cost_xp": 1500, "category": "outing", "stock": None,
-             "image_url": None, "active": True,
-             "created_by": "system", "created_at": now_iso},
-            {"reward_id": str(uuid.uuid4()), "name": "Amazon Gift Voucher ₹500",
-             "description": "Digital gift card, redeem online.",
-             "cost_xp": 2000, "category": "voucher", "stock": None,
-             "image_url": None, "active": True,
-             "created_by": "system", "created_at": now_iso},
         ])
 
 

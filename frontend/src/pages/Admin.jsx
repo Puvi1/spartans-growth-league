@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
-import { Users, Trophy, Target, Fire, ChartLine, Sparkle, MagnifyingGlass, Check, X, Crosshair, ClipboardText, Cake, Heart, Crown, Medal, CalendarBlank } from "@phosphor-icons/react";
+import { Users, Trophy, Target, Fire, ChartLine, Sparkle, MagnifyingGlass, Check, X, Crosshair, ClipboardText, Cake, Heart, Crown, Medal, PencilSimple, Trash } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 import StatCard from "@/components/StatCard";
 import PositionBadges, { POSITION_BADGE_META } from "@/components/PositionBadges";
+import Avatar from "@/components/Avatar";
 
 const ROLES = ["member", "team_leader", "super_admin"];
 const ALL_BADGES = Object.keys(POSITION_BADGE_META);
@@ -15,23 +16,49 @@ export default function Admin() {
     const [analytics, setAnalytics] = useState(null);
     const [widgets, setWidgets] = useState(null);
     const [users, setUsers] = useState([]);
+    const [teams, setTeams] = useState([]);
     const [query, setQuery] = useState("");
     const [teamFilter, setTeamFilter] = useState("all");
     const [badgeUser, setBadgeUser] = useState(null);
     const [selectedBadges, setSelectedBadges] = useState([]);
+    const [editUser, setEditUser] = useState(null);
+    const [editForm, setEditForm] = useState({ name: "", team_id: "", role: "member" });
     const canPromote = user?.role === "super_admin";
 
     const load = async () => {
-        const [a, w, u] = await Promise.all([
+        const [a, w, u, t] = await Promise.all([
             api.get("/admin/analytics"),
             api.get("/admin/dashboard-widgets"),
             api.get("/admin/users"),
+            api.get("/teams/public").catch(() => ({ data: [] })),
         ]);
         setAnalytics(a.data);
         setWidgets(w.data);
         setUsers(u.data);
+        setTeams(t.data);
     };
     useEffect(() => { load(); }, []);
+
+    const openEdit = (u) => {
+        setEditUser(u);
+        setEditForm({ name: u.name || "", team_id: u.team_id || "", role: u.role || "member" });
+    };
+    const saveEdit = async () => {
+        try {
+            await api.patch(`/admin/users/${editUser.user_id}`, editForm);
+            toast.success("Member updated");
+            setEditUser(null);
+            await load();
+        } catch (err) { toast.error(err.response?.data?.detail || "Failed"); }
+    };
+    const deleteUser = async (uid, name) => {
+        if (!window.confirm(`Delete ${name}? This cannot be undone.`)) return;
+        try {
+            await api.delete(`/admin/users/${uid}`);
+            toast.success(`${name} removed`);
+            await load();
+        } catch (err) { toast.error(err.response?.data?.detail || "Failed"); }
+    };
 
     const changeRole = async (uid, role) => {
         try {
@@ -59,7 +86,7 @@ export default function Admin() {
 
     if (!analytics) return <div className="text-zinc-500 text-sm">Loading command center...</div>;
 
-    const teams = Array.from(new Set(users.map((u) => u.team).filter(Boolean))).sort();
+    const teamNames = Array.from(new Set(users.map((u) => u.team).filter(Boolean))).sort();
     const filtered = users.filter((u) =>
         (teamFilter === "all" || u.team === teamFilter) &&
         (!query || u.name?.toLowerCase().includes(query.toLowerCase()) || u.email?.toLowerCase().includes(query.toLowerCase()))
@@ -113,13 +140,13 @@ export default function Admin() {
                         </div>
                         <select value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)} className="field text-sm" data-testid="admin-team-filter">
                             <option value="all">All Teams</option>
-                            {teams.map((t) => <option key={t} value={t}>{t}</option>)}
+                            {teamNames.map((t) => <option key={t} value={t}>{t}</option>)}
                         </select>
                         <div className="text-xs text-zinc-500 hidden md:block">{filtered.length} shown</div>
                     </div>
                 </div>
                 <div className="overflow-x-auto">
-                    <table className="w-full min-w-[860px]">
+                    <table className="w-full min-w-[960px]">
                         <thead>
                             <tr className="text-[10px] uppercase tracking-widest text-zinc-500">
                                 <th className="text-left py-2 px-3">Spartan</th>
@@ -129,6 +156,7 @@ export default function Admin() {
                                 <th className="text-left py-2 px-3">Streak</th>
                                 <th className="text-left py-2 px-3">Position Badges</th>
                                 <th className="text-left py-2 px-3">Role</th>
+                                <th className="text-right py-2 px-3">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -136,12 +164,11 @@ export default function Admin() {
                                 <motion.tr key={u.user_id} whileHover={{ backgroundColor: "rgba(255,255,255,0.03)" }} className="border-t border-white/5" data-testid={`admin-user-row-${u.user_id}`}>
                                     <td className="py-3 px-3">
                                         <div className="flex items-center gap-3">
-                                            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-yellow-500 to-blue-500 grid place-items-center font-bold text-black text-xs">
-                                                {u.name?.[0]}
-                                            </div>
+                                            <Avatar user={u} size={32} />
                                             <div>
                                                 <div className="text-sm font-semibold">{u.name}</div>
                                                 <div className="text-[10px] text-zinc-500">{u.email}</div>
+                                                {u.nexus_id && <div className="text-[9px] font-mono text-yellow-500/80">{u.nexus_id}</div>}
                                             </div>
                                         </div>
                                     </td>
@@ -172,15 +199,71 @@ export default function Admin() {
                                             <span className="chip-zinc">{u.role.replace("_", " ")}</span>
                                         )}
                                     </td>
+                                    <td className="py-3 px-3">
+                                        {canPromote && u.role !== "super_admin" && (
+                                            <div className="flex items-center justify-end gap-1">
+                                                <button
+                                                    onClick={() => openEdit(u)}
+                                                    className="p-1.5 rounded-lg text-blue-400 hover:bg-blue-500/10"
+                                                    data-testid={`admin-edit-${u.user_id}`}
+                                                    title="Edit"
+                                                >
+                                                    <PencilSimple size={14} weight="bold" />
+                                                </button>
+                                                <button
+                                                    onClick={() => deleteUser(u.user_id, u.name)}
+                                                    className="p-1.5 rounded-lg text-red-400 hover:bg-red-500/10"
+                                                    data-testid={`admin-delete-${u.user_id}`}
+                                                    title="Delete"
+                                                >
+                                                    <Trash size={14} weight="bold" />
+                                                </button>
+                                            </div>
+                                        )}
+                                    </td>
                                 </motion.tr>
                             ))}
                             {filtered.length === 0 && (
-                                <tr><td colSpan={7} className="py-8 text-center text-zinc-500 text-sm">No spartans match your search.</td></tr>
+                                <tr><td colSpan={8} className="py-8 text-center text-zinc-500 text-sm">No spartans match your search.</td></tr>
                             )}
                         </tbody>
                     </table>
                 </div>
             </section>
+
+            <AnimatePresence>
+                {editUser && (
+                    <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm grid place-items-center p-4" onClick={() => setEditUser(null)}>
+                        <motion.div initial={{scale:0.9}} animate={{scale:1}} onClick={(e)=>e.stopPropagation()} className="glass-strong p-6 md:p-8 w-full max-w-md relative" data-testid="edit-user-modal">
+                            <button type="button" onClick={() => setEditUser(null)} className="absolute top-4 right-4 text-zinc-500 hover:text-white"><X size={20} /></button>
+                            <div className="heading-eyebrow mb-2">Edit member</div>
+                            <h3 className="font-display font-black text-2xl mb-6">{editUser.name}</h3>
+                            <div className="space-y-3">
+                                <div>
+                                    <label className="text-[10px] uppercase tracking-widest text-zinc-500 block mb-1">Name</label>
+                                    <input value={editForm.name} onChange={(e) => setEditForm({...editForm, name: e.target.value})} className="field" data-testid="edit-user-name" />
+                                </div>
+                                <div>
+                                    <label className="text-[10px] uppercase tracking-widest text-zinc-500 block mb-1">Team</label>
+                                    <select value={editForm.team_id} onChange={(e) => setEditForm({...editForm, team_id: e.target.value})} className="field" data-testid="edit-user-team">
+                                        <option value="">Unassigned</option>
+                                        {teams.map((t) => <option key={t.team_id} value={t.team_id}>{t.name}</option>)}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="text-[10px] uppercase tracking-widest text-zinc-500 block mb-1">Role</label>
+                                    <select value={editForm.role} onChange={(e) => setEditForm({...editForm, role: e.target.value})} className="field" data-testid="edit-user-role">
+                                        {ROLES.map((r) => <option key={r} value={r}>{r.replace("_", " ")}</option>)}
+                                    </select>
+                                </div>
+                            </div>
+                            <button onClick={saveEdit} className="btn-gold w-full mt-6" data-testid="save-edit-user">
+                                <Check size={16} weight="bold" /> Save Changes
+                            </button>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
             <AnimatePresence>
                 {badgeUser && (

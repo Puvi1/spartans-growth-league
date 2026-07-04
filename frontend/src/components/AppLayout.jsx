@@ -1,15 +1,16 @@
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import {
     House, Target, Phone, Trophy, User, ChartLine,
-    Sword, SignOut, ShieldStar, Calendar, Fire,
-    Users, UsersThree, ChartBar, Crosshair, CalendarCheck, ClipboardText, MedalMilitary, GameController, Gift, Flag,
+    Sword, SignOut, ShieldStar, Fire,
+    Users, UsersThree, ChartBar, Crosshair, CalendarCheck, ClipboardText, MedalMilitary, Gift, Flag,
 } from "@phosphor-icons/react";
 import { useAuth } from "@/context/AuthContext";
 import { motion } from "framer-motion";
+import NotificationBell from "@/components/NotificationBell";
 
 const BASE_NAV = [
     { to: "/", icon: House, label: "Dashboard", testId: "nav-dashboard" },
-    { to: "/missions", icon: Crosshair, label: "Missions", testId: "nav-missions" },
+    { to: "/missions", icon: Crosshair, label: "Daily Missions", testId: "nav-missions" },
     { to: "/weekly-attendance", icon: CalendarCheck, label: "Attendance", testId: "nav-weekly" },
     { to: "/seasons", icon: MedalMilitary, label: "Seasons", testId: "nav-seasons", requiresSeasonAccess: true },
     { to: "/tasks", icon: ClipboardText, label: "Tasks", testId: "nav-tasks" },
@@ -96,6 +97,7 @@ export default function AppLayout({ children }) {
                                 {user?.role?.replace("_", " ")}
                             </div>
                         </div>
+                        <NotificationBell />
                         <button
                             onClick={handleLogout}
                             className="p-2 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-red-500/10 transition-colors"
@@ -121,6 +123,7 @@ export default function AppLayout({ children }) {
                         <div className="chip-gold" data-testid="mobile-level-chip">
                             <ShieldStar size={12} weight="fill" /> LVL {user?.level || 1}
                         </div>
+                        <NotificationBell />
                         <button
                             onClick={handleLogout}
                             className="p-2 rounded-lg text-zinc-400 hover:text-red-400"

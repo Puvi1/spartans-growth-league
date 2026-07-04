@@ -18,12 +18,20 @@ function urgencyOf(dueDate, status) {
     return { chip: "chip-zinc", label: "Upcoming" };
 }
 
+const TIME_SLOTS = [
+    { value: "8-10am", label: "8:00 AM – 10:00 AM" },
+    { value: "10-12pm", label: "10:00 AM – 12:00 PM" },
+    { value: "2-4pm", label: "2:00 PM – 4:00 PM" },
+    { value: "6-8pm", label: "6:00 PM – 8:00 PM" },
+];
+
 export default function FollowUps() {
     const { refreshUser } = useAuth();
     const [items, setItems] = useState([]);
     const [modal, setModal] = useState(false);
+    const [tab, setTab] = useState("pending");
     const [prospects, setProspects] = useState([]);
-    const [form, setForm] = useState({ title: "", due_date: new Date().toISOString().slice(0, 10), prospect_id: "", notes: "" });
+    const [form, setForm] = useState({ title: "", due_date: new Date().toISOString().slice(0, 10), time_slot: "10-12pm", prospect_id: "", notes: "" });
 
     const load = async () => {
         const { data } = await api.get("/followups");
@@ -41,9 +49,9 @@ export default function FollowUps() {
             await api.post("/followups", payload);
             toast.success("Follow-up scheduled");
             setModal(false);
-            setForm({ title: "", due_date: new Date().toISOString().slice(0, 10), prospect_id: "", notes: "" });
+            setForm({ title: "", due_date: new Date().toISOString().slice(0, 10), time_slot: "10-12pm", prospect_id: "", notes: "" });
             await load();
-        } catch (err) {
+        } catch {
             toast.error("Failed to add");
         }
     };
@@ -62,7 +70,9 @@ export default function FollowUps() {
     };
 
     const pending = items.filter((f) => f.status !== "done");
-    const done = items.filter((f) => f.status === "done").slice(0, 20);
+    const overdue = pending.filter((f) => urgencyOf(f.due_date, f.status).label === "Overdue");
+    const completed = items.filter((f) => f.status === "done");
+    const listByTab = tab === "overdue" ? overdue : tab === "completed" ? completed : pending;
 
     return (
         <div className="space-y-6" data-testid="followups-page">
@@ -78,77 +88,60 @@ export default function FollowUps() {
             </div>
 
             <div className="grid grid-cols-3 gap-3">
-                <div className="glass p-4">
+                <button onClick={() => setTab("pending")} className={`glass p-4 text-left transition-all ${tab === "pending" ? "ring-2 ring-yellow-500/60" : ""}`} data-testid="followup-tab-pending">
                     <div className="chip-gold">Pending</div>
                     <div className="font-display text-3xl font-black mt-3">{pending.length}</div>
-                </div>
-                <div className="glass p-4">
+                </button>
+                <button onClick={() => setTab("overdue")} className={`glass p-4 text-left transition-all ${tab === "overdue" ? "ring-2 ring-red-500/60" : ""}`} data-testid="followup-tab-overdue">
                     <div className="chip-red">Overdue</div>
-                    <div className="font-display text-3xl font-black mt-3">
-                        {pending.filter((f) => urgencyOf(f.due_date, f.status).label === "Overdue").length}
-                    </div>
-                </div>
-                <div className="glass p-4">
+                    <div className="font-display text-3xl font-black mt-3">{overdue.length}</div>
+                </button>
+                <button onClick={() => setTab("completed")} className={`glass p-4 text-left transition-all ${tab === "completed" ? "ring-2 ring-emerald-500/60" : ""}`} data-testid="followup-tab-completed">
                     <div className="chip-emerald">Completed</div>
-                    <div className="font-display text-3xl font-black mt-3">{items.filter((f) => f.status === "done").length}</div>
-                </div>
+                    <div className="font-display text-3xl font-black mt-3">{completed.length}</div>
+                </button>
             </div>
 
             <div className="glass p-4">
-                <h3 className="font-display font-bold text-lg mb-4">Active</h3>
+                <h3 className="font-display font-bold text-lg mb-4 capitalize">{tab}</h3>
                 <div className="space-y-2">
-                    {pending.length === 0 && (
+                    {listByTab.length === 0 && (
                         <div className="text-center py-10">
                             <Phone size={40} weight="duotone" className="text-zinc-700 mx-auto" />
-                            <div className="text-zinc-500 mt-3 text-sm">No follow-ups scheduled.</div>
+                            <div className="text-zinc-500 mt-3 text-sm">Nothing here yet.</div>
                         </div>
                     )}
-                    {pending.map((f) => {
+                    {listByTab.map((f) => {
                         const u = urgencyOf(f.due_date, f.status);
+                        const slot = TIME_SLOTS.find((s) => s.value === f.time_slot);
                         return (
                             <div key={f.followup_id} className="p-4 rounded-xl bg-white/[0.02] border border-white/5" data-testid={`followup-row-${f.followup_id}`}>
                                 <div className="flex flex-col md:flex-row md:items-center gap-3">
                                     <div className="flex-1">
-                                        <div className="flex items-center gap-3 flex-wrap">
+                                        <div className="flex items-center gap-2 flex-wrap">
                                             <span className="font-bold">{f.title}</span>
                                             <span className={u.chip}><ClockCountdown size={10} weight="fill" /> {u.label}</span>
+                                            {slot && <span className="chip-blue">{slot.label}</span>}
                                         </div>
                                         <div className="text-xs text-zinc-500 mt-1">Due {f.due_date}</div>
                                         {f.notes && <div className="text-xs text-zinc-400 mt-1 italic">&ldquo;{f.notes}&rdquo;</div>}
                                     </div>
-                                    <div className="flex items-center gap-2">
-                                        <button onClick={() => markDone(f.followup_id)} className="btn-blue py-2 px-3 text-xs" data-testid={`followup-done-${f.followup_id}`}>
-                                            <Check size={14} weight="bold" /> Done
-                                        </button>
-                                        <button onClick={() => remove(f.followup_id)} className="p-2 rounded-lg text-red-400 hover:bg-red-500/10">
-                                            <Trash size={16} />
-                                        </button>
-                                    </div>
+                                    {f.status !== "done" && (
+                                        <div className="flex items-center gap-2">
+                                            <button onClick={() => markDone(f.followup_id)} className="btn-blue py-2 px-3 text-xs" data-testid={`followup-done-${f.followup_id}`}>
+                                                <Check size={14} weight="bold" /> Done
+                                            </button>
+                                            <button onClick={() => remove(f.followup_id)} className="p-2 rounded-lg text-red-400 hover:bg-red-500/10">
+                                                <Trash size={16} />
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         );
                     })}
                 </div>
             </div>
-
-            {done.length > 0 && (
-                <div className="glass p-4">
-                    <h3 className="font-display font-bold text-lg mb-4">Recently Crushed</h3>
-                    <div className="space-y-2">
-                        {done.map((f) => (
-                            <div key={f.followup_id} className="p-3 rounded-xl bg-white/[0.02] border border-white/5 opacity-70">
-                                <div className="flex items-center justify-between gap-3">
-                                    <div className="flex items-center gap-2">
-                                        <Check size={16} className="text-emerald-400" />
-                                        <span className="text-sm">{f.title}</span>
-                                    </div>
-                                    <span className="text-xs text-zinc-500">{f.due_date}</span>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            )}
 
             <AnimatePresence>
                 {modal && (
@@ -159,7 +152,12 @@ export default function FollowUps() {
                             <h3 className="font-display font-black text-2xl mb-6">Schedule Follow-Up</h3>
                             <div className="space-y-3">
                                 <input required placeholder="Task (e.g. Call Sarah re: offer)" value={form.title} onChange={(e) => setForm({...form, title: e.target.value})} className="field" data-testid="followup-title-input" />
-                                <input required type="date" value={form.due_date} onChange={(e) => setForm({...form, due_date: e.target.value})} className="field" data-testid="followup-date-input" />
+                                <div className="grid grid-cols-2 gap-3">
+                                    <input required type="date" value={form.due_date} onChange={(e) => setForm({...form, due_date: e.target.value})} className="field" data-testid="followup-date-input" />
+                                    <select value={form.time_slot} onChange={(e) => setForm({...form, time_slot: e.target.value})} className="field" data-testid="followup-timeslot-input">
+                                        {TIME_SLOTS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                                    </select>
+                                </div>
                                 <select value={form.prospect_id} onChange={(e) => setForm({...form, prospect_id: e.target.value})} className="field">
                                     <option value="">Link prospect (optional)</option>
                                     {prospects.map((p) => <option key={p.prospect_id} value={p.prospect_id}>{p.name}</option>)}

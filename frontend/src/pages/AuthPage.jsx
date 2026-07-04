@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { formatApiError } from "@/lib/api";
 import { motion } from "framer-motion";
-import { Sword, GoogleLogo, Envelope, LockKey, User as UserIcon, ArrowRight, ShieldStar, Trophy, Fire } from "@phosphor-icons/react";
+import { Sword, GoogleLogo, Envelope, LockKey, User as UserIcon, ArrowRight, ShieldStar, Trophy, Fire, Barcode } from "@phosphor-icons/react";
 import { toast } from "sonner";
 
 // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
@@ -18,6 +18,7 @@ export default function AuthPage() {
     const [password, setPassword] = useState("");
     const [name, setName] = useState("");
     const [phone, setPhone] = useState("");
+    const [nexusId, setNexusId] = useState("");
     const [error, setError] = useState("");
     const [submitting, setSubmitting] = useState(false);
     const { login, register } = useAuth();
@@ -35,7 +36,12 @@ export default function AuthPage() {
                 toast.success("Welcome back, Spartan!");
                 navigate(from, { replace: true });
             } else {
-                const payload = { email, password, name };
+                if (!nexusId.trim() || nexusId.trim().length < 3) {
+                    setError("Business Centre (Nexus ID) is required — minimum 3 characters");
+                    setSubmitting(false);
+                    return;
+                }
+                const payload = { email, password, name, nexus_id: nexusId.trim() };
                 if (phone) payload.phone = phone;
                 await register(payload);
                 toast.success("Your Spartan journey begins now!");
@@ -129,15 +135,30 @@ export default function AuthPage() {
 
                     <form onSubmit={submit} className="space-y-4">
                         {mode === "register" && (
-                            <IconInput
-                                icon={UserIcon}
-                                type="text"
-                                placeholder="Your name"
-                                value={name}
-                                onChange={(e) => setName(e.target.value)}
-                                testId="auth-name-input"
-                                required
-                            />
+                            <>
+                                <div className="p-3 rounded-xl bg-yellow-500/5 border border-yellow-500/20 text-[11px] text-yellow-200/80 leading-relaxed">
+                                    <span className="text-yellow-400 font-bold uppercase tracking-widest">Business Centre required</span> — enter your Nexus ID to enlist.
+                                </div>
+                                <IconInput
+                                    icon={Barcode}
+                                    type="text"
+                                    placeholder="Business Centre (Nexus ID) — e.g. BC-1042"
+                                    value={nexusId}
+                                    onChange={(e) => setNexusId(e.target.value.toUpperCase())}
+                                    testId="auth-nexus-input"
+                                    required
+                                    autoComplete="off"
+                                />
+                                <IconInput
+                                    icon={UserIcon}
+                                    type="text"
+                                    placeholder="Your name"
+                                    value={name}
+                                    onChange={(e) => setName(e.target.value)}
+                                    testId="auth-name-input"
+                                    required
+                                />
+                            </>
                         )}
                         <IconInput
                             icon={Envelope}

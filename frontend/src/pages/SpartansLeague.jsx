@@ -5,6 +5,7 @@ import { Trophy, Crown, Medal, Users, Fire, ShieldStar, Sparkle, TrendUp, Target
 import { motion, AnimatePresence } from "framer-motion";
 import ProgressBar from "@/components/ProgressBar";
 import PositionBadges from "@/components/PositionBadges";
+import Avatar from "@/components/Avatar";
 
 export default function SpartansLeague() {
     const { user } = useAuth();
@@ -148,18 +149,18 @@ function IndividualLeagueView({ data, me, isSeasonMode }) {
                             <div className={`w-9 h-9 md:w-10 md:h-10 grid place-items-center rounded-lg font-mono font-bold ${r.rank <= 3 ? "bg-yellow-500 text-black" : "bg-white/5 text-zinc-400"}`}>
                                 {r.rank}
                             </div>
-                            <div className="w-10 h-10 md:w-11 md:h-11 rounded-full bg-gradient-to-br from-yellow-500 to-blue-500 grid place-items-center font-bold text-black">
-                                {r.name?.[0]}
-                            </div>
+                            <Avatar user={r} size={44} />
                             <div className="flex-1 min-w-0">
                                 <div className="font-bold truncate flex items-center gap-1 flex-wrap">
                                     {r.name}
                                     <PositionBadges badges={r.position_badges || []} size="xs" limit={2} />
                                 </div>
                                 <div className="flex items-center gap-3 mt-0.5 text-[10px] uppercase tracking-widest text-zinc-500 flex-wrap">
-                                    <span>{r.team}</span>
+                                    <span>{r.team || "Unassigned"}</span>
+                                    {r.club_type && <span className="text-blue-400">{r.club_type}</span>}
                                     <span className="text-yellow-500">LVL {r.level}</span>
                                     <span className="flex items-center gap-1"><Fire size={10} weight="fill" className="text-yellow-500" /> {r.streak_current}</span>
+                                    <span className="font-mono">{(r.xp || 0).toLocaleString()} XP</span>
                                     {r.attendance_pct > 0 && <span className="text-emerald-400">{r.attendance_pct}% attn</span>}
                                 </div>
                             </div>
@@ -219,6 +220,7 @@ function TeamRow({ t, isMine }) {
     const rankColors = t.rank === 1 ? "bg-yellow-500 text-black" :
         t.rank === 2 ? "bg-zinc-300 text-black" :
         t.rank === 3 ? "bg-amber-700 text-white" : "bg-white/5 text-zinc-400";
+    const leader = t.leader_name ? { name: t.leader_name, avatar_url: t.leader_avatar_url, position_badges: t.leader_badges } : null;
     return (
         <motion.div
             whileHover={{ y: -2 }}
@@ -230,15 +232,22 @@ function TeamRow({ t, isMine }) {
                 <div className={`w-12 h-12 md:w-14 md:h-14 grid place-items-center rounded-2xl font-mono font-black text-xl md:text-2xl ${rankColors}`}>
                     {t.rank === 1 ? <Crown size={24} weight="fill" /> : t.rank}
                 </div>
+                {leader && <Avatar user={leader} size={44} />}
                 <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                         <h3 className="font-display font-black text-lg md:text-xl">Team {t.name}</h3>
                         {isMine && <span className="chip-blue">Your team</span>}
                     </div>
+                    {leader && (
+                        <div className="text-[10px] uppercase tracking-widest text-yellow-500/80 flex items-center gap-2 flex-wrap">
+                            <Crown size={10} weight="fill" /> {leader.name}
+                            <PositionBadges badges={leader.position_badges} size="xs" limit={2} />
+                        </div>
+                    )}
                     <div className="text-[10px] uppercase tracking-widest text-zinc-500 mt-1 flex items-center gap-3 flex-wrap">
                         <span className="flex items-center gap-1"><Users size={10} /> {t.members}</span>
                         <span className="flex items-center gap-1"><TrendUp size={10} /> {t.xp} XP</span>
-                        <span className="flex items-center gap-1"><Target size={10} /> {t.missions} Missions</span>
+                        <span className="flex items-center gap-1"><Target size={10} /> {t.mission_pct ?? 0}% missions</span>
                         <span className="flex items-center gap-1"><ClipboardText size={10} /> {t.tasks} Tasks</span>
                         <span className="flex items-center gap-1"><Flag size={10} /> {t.goals} Goals</span>
                         <span className="flex items-center gap-1 text-emerald-400"><CalendarCheck size={10} weight="fill" /> {t.attendance_pct}%</span>
@@ -299,11 +308,14 @@ function PodiumCard({ rank, row, iconColor, borderColor, glow, isFirst }) {
              data-testid={`podium-${rank}`}
         >
             <Icon size={rank === 1 ? 40 : 32} weight="fill" className={`${iconColor} mx-auto mb-2 ${isFirst ? "float-slow" : ""}`} />
-            <div className="w-14 h-14 md:w-16 md:h-16 mx-auto rounded-full bg-gradient-to-br from-yellow-500 to-blue-500 grid place-items-center font-display font-black text-lg md:text-xl text-black">
-                {row.name?.[0]}
+            <div className="mx-auto">
+                <Avatar user={row} size={rank === 1 ? 72 : 60} />
             </div>
             <div className="mt-2 font-bold text-xs md:text-sm truncate">{row.name}</div>
-            <div className="text-[10px] uppercase tracking-widest text-zinc-500 mt-1 truncate">{row.team}</div>
+            <div className="text-[10px] uppercase tracking-widest text-zinc-500 mt-1 truncate">{row.team || "Unassigned"}</div>
+            <div className="mt-1 flex items-center justify-center gap-1 flex-wrap">
+                <PositionBadges badges={row.position_badges || []} size="xs" limit={2} />
+            </div>
             <div className="mt-2 font-mono font-black text-yellow-400 text-base md:text-lg">{Math.round(row.score).toLocaleString()}</div>
             <div className="mt-1 chip-gold mx-auto"><ShieldStar size={10} weight="fill" /> LVL {row.level}</div>
         </div>

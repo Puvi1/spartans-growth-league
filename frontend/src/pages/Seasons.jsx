@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
-import { Plus, X, CheckCircle, XCircle, MinusCircle, Trash, Calendar, Trophy, Users } from "@phosphor-icons/react";
+import { Plus, X, CheckCircle, XCircle, MinusCircle, Trash, Calendar, Trophy, Users, CurrencyDollar, Archive } from "@phosphor-icons/react";
 import { motion, AnimatePresence } from "framer-motion";
 import ProgressBar from "@/components/ProgressBar";
 
@@ -18,7 +18,7 @@ export default function Seasons() {
     const [form, setForm] = useState({
         name: "", start_date: new Date().toISOString().slice(0, 10),
         end_date: new Date(Date.now() + 90 * 864e5).toISOString().slice(0, 10),
-        is_believer: false,
+        is_believer: false, total_pv: "", total_earnings: "",
     });
 
     const load = async () => {
@@ -35,16 +35,27 @@ export default function Seasons() {
     const create = async (e) => {
         e.preventDefault();
         try {
-            await api.post("/seasons", form);
+            const payload = { ...form };
+            payload.total_pv = payload.total_pv === "" ? null : Number(payload.total_pv);
+            payload.total_earnings = payload.total_earnings === "" ? null : Number(payload.total_earnings);
+            await api.post("/seasons", payload);
             toast.success("Season created");
             setModal(false);
             setForm({
                 name: "", start_date: new Date().toISOString().slice(0, 10),
                 end_date: new Date(Date.now() + 90 * 864e5).toISOString().slice(0, 10),
-                is_believer: false,
+                is_believer: false, total_pv: "", total_earnings: "",
             });
             await load();
         } catch (err) { toast.error(err.response?.data?.detail || "Failed"); }
+    };
+
+    const finalize = async (id) => {
+        if (!window.confirm("Snapshot this season into history? Rankings will be preserved permanently.")) return;
+        try {
+            await api.post(`/admin/seasons/${id}/finalize`);
+            toast.success("Season archived to history");
+        } catch { toast.error("Failed to archive"); }
     };
 
     const remove = async (id) => {
@@ -87,7 +98,7 @@ export default function Seasons() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {filtered.length === 0 && <div className="text-zinc-500 text-sm md:col-span-2">No seasons yet.</div>}
                 {filtered.map((s) => (
-                    <SeasonCard key={s.season_id} season={s} onOpen={() => setSelected(s)} onDelete={() => remove(s.season_id)} canDelete={isAdmin} />
+                    <SeasonCard key={s.season_id} season={s} onOpen={() => setSelected(s)} onDelete={() => remove(s.season_id)} onFinalize={() => finalize(s.season_id)} canDelete={isAdmin} canFinalize={isAdmin} />
                 ))}
             </div>
 
@@ -108,6 +119,16 @@ export default function Seasons() {
                                     <input type="checkbox" checked={form.is_believer} onChange={(e)=>setForm({...form, is_believer: e.target.checked})} className="w-4 h-4" data-testid="season-believer-toggle" />
                                     <span className="text-sm">Believer season (Tuesday meetings only)</span>
                                 </label>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="text-[10px] uppercase tracking-widest text-zinc-500 block mb-1">Season PV (optional)</label>
+                                        <input type="number" step="0.01" min="0" placeholder="0" value={form.total_pv} onChange={(e)=>setForm({...form, total_pv: e.target.value})} className="field font-mono" data-testid="season-pv-input" />
+                                    </div>
+                                    <div>
+                                        <label className="text-[10px] uppercase tracking-widest text-zinc-500 block mb-1">Season Earnings (optional)</label>
+                                        <input type="number" step="0.01" min="0" placeholder="0" value={form.total_earnings} onChange={(e)=>setForm({...form, total_earnings: e.target.value})} className="field font-mono" data-testid="season-earnings-input" />
+                                    </div>
+                                </div>
                             </div>
                             <button type="submit" className="btn-gold w-full mt-6" data-testid="season-submit-btn">Launch Season</button>
                         </motion.form>
@@ -189,7 +210,7 @@ export default function Seasons() {
     );
 }
 
-function SeasonCard({ season, onOpen, onDelete, canDelete }) {
+function SeasonCard({ season, onOpen, onDelete, onFinalize, canDelete, canFinalize }) {
     return (
         <motion.div
             whileHover={{ y: -3 }}
@@ -213,12 +234,31 @@ function SeasonCard({ season, onOpen, onDelete, canDelete }) {
                     </div>
                     {season.is_believer ? <span className="chip-gold">Believer</span> : <span className="chip-blue">Regular</span>}
                 </div>
-                <div className="mt-4 text-xs text-zinc-500">Tap to view your report</div>
-                {canDelete && (
-                    <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="absolute bottom-4 right-4 p-2 rounded-lg text-red-400 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Trash size={14} />
-                    </button>
+                {(season.total_pv || season.total_earnings) && (
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                        <div className="p-2 rounded-lg bg-white/[0.02] border border-white/5">
+                            <div className="text-[9px] uppercase tracking-widest text-zinc-500">Season PV</div>
+                            <div className="font-display font-black text-yellow-400 mt-0.5">{Number(season.total_pv || 0).toLocaleString()}</div>
+                        </div>
+                        <div className="p-2 rounded-lg bg-white/[0.02] border border-white/5">
+                            <div className="text-[9px] uppercase tracking-widest text-zinc-500">Earnings</div>
+                            <div className="font-display font-black text-emerald-400 mt-0.5">₹{Number(season.total_earnings || 0).toLocaleString()}</div>
+                        </div>
+                    </div>
                 )}
+                <div className="mt-4 text-xs text-zinc-500">Tap to view your report</div>
+                <div className="absolute bottom-4 right-4 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {canFinalize && (
+                        <button onClick={(e) => { e.stopPropagation(); onFinalize(); }} className="p-2 rounded-lg text-yellow-400 hover:bg-yellow-500/10" title="Archive to history" data-testid={`finalize-season-${season.season_id}`}>
+                            <Archive size={14} />
+                        </button>
+                    )}
+                    {canDelete && (
+                        <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="p-2 rounded-lg text-red-400 hover:bg-red-500/10">
+                            <Trash size={14} />
+                        </button>
+                    )}
+                </div>
             </div>
         </motion.div>
     );

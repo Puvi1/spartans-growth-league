@@ -9,6 +9,7 @@ import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { fireBigConfetti } from "@/lib/confetti";
 import PositionBadges from "@/components/PositionBadges";
+import AvatarUploader from "@/components/AvatarUploader";
 
 export default function Profile() {
     const { user, refreshUser } = useAuth();
@@ -40,6 +41,7 @@ export default function Profile() {
                 phone: user.phone || "",
                 bio: user.bio || "",
                 avatar_url: user.avatar_url || "",
+                nexus_id: user.nexus_id || "",
                 team_id: user.team_id || "",
                 dob: user.dob || "",
                 gender: user.gender || "",
@@ -138,10 +140,8 @@ export default function Profile() {
                                 </linearGradient>
                             </defs>
                         </svg>
-                        <div className="absolute inset-4 rounded-full bg-gradient-to-br from-yellow-500 to-blue-500 grid place-items-center font-display font-black text-6xl text-black">
-                            {user.picture ? (
-                                <img src={user.picture} alt="" className="w-full h-full rounded-full object-cover" />
-                            ) : initials}
+                        <div className="absolute inset-4 rounded-full overflow-hidden bg-gradient-to-br from-yellow-500 to-blue-500 grid place-items-center font-display font-black text-6xl text-black">
+                            <AvatarUploader user={user} size={168} onUploaded={() => refreshUser?.()} />
                         </div>
                         <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 chip-gold shadow-lg">
                             <ShieldStar size={12} weight="fill" /> LVL {stats.level}
@@ -154,6 +154,11 @@ export default function Profile() {
                             {user.name}
                         </h1>
                         <div className="text-zinc-500 mt-2">{user.email}</div>
+                        {user.nexus_id && (
+                            <div className="mt-1 text-[10px] uppercase tracking-widest text-yellow-400 font-mono" data-testid="profile-nexus-display">
+                                Nexus · {user.nexus_id}
+                            </div>
+                        )}
                         <div className="mt-3 flex items-center gap-2 flex-wrap justify-center md:justify-start">
                             <span className="chip-blue">Team {user.team || "Unassigned"}</span>
                             <PositionBadges badges={user.position_badges || []} size="sm" />
@@ -247,13 +252,16 @@ export default function Profile() {
                                     )}
                                 </FormRow>
                                 {form.marital_status === "married" && (
-                                    <Field label="Anniversary Photo (URL)" testId="profile-anniversary-photo-input">
-                                        <input type="url" placeholder="https://..." value={form.anniversary_photo} onChange={(e)=>setForm({...form, anniversary_photo: e.target.value})} className="field" />
-                                    </Field>
+                                    <div className="text-[10px] uppercase tracking-widest text-zinc-500">
+                                        Anniversary photo upload coming soon
+                                    </div>
                                 )}
-                                <Field label="Profile Photo (URL)" testId="profile-avatar-input">
-                                    <input type="url" placeholder="https://..." value={form.avatar_url} onChange={(e)=>setForm({...form, avatar_url: e.target.value})} className="field" />
+                                <Field label="Business Centre (Nexus ID)" testId="profile-nexus-input">
+                                    <input value={form.nexus_id} onChange={(e)=>setForm({...form, nexus_id: e.target.value.toUpperCase()})} placeholder="BC-XXXX" className="field font-mono uppercase" />
                                 </Field>
+                                <div className="text-[10px] uppercase tracking-widest text-zinc-500">
+                                    Profile photo · upload above using the camera icon (JPG / PNG / WEBP · max 2 MB)
+                                </div>
                                 <FormRow>
                                     <Field label="City" testId="profile-city-input">
                                         <input value={form.city} onChange={(e)=>setForm({...form, city: e.target.value})} className="field" />
