@@ -148,6 +148,9 @@ export default function AppLayout({ children }) {
                     className="flex items-center gap-2 px-2 py-1 rounded-xl hover:bg-white/5"
                 >
                     <Avatar user={user} size={32} />
+                    <span className="text-xs font-semibold max-w-[70px] truncate">
+    {user?.name?.split(" ")[0]}
+</span>
                 </button>
 
                 {profileMenuOpen && (
@@ -190,7 +193,7 @@ export default function AppLayout({ children }) {
             {/* Mobile Full Menu Drawer */}
 {mobileMenuOpen && (
   <div className="lg:hidden fixed inset-0 z-50 bg-black/70 backdrop-blur-sm">
-    <div className="absolute left-0 top-0 h-full w-80 max-w-[85%] bg-[#08080b] border-r border-white/10 overflow-y-auto">
+   <div className="absolute left-0 top-0 h-full w-80 max-w-[85%] bg-[#08080b] border-r border-white/10 overflow-y-auto z-50">
 
       <div className="flex items-center justify-between p-4 border-b border-white/10">
         <h2 className="text-lg font-bold text-white">Menu</h2>
@@ -233,10 +236,10 @@ export default function AppLayout({ children }) {
       </div>
     </div>
 
-    <div
-      className="absolute inset-0"
-      onClick={() => setMobileMenuOpen(false)}
-    />
+   <div
+    className="absolute inset-0 z-40"
+    onClick={() => setMobileMenuOpen(false)}
+/>
   </div>
 )}
 
@@ -244,11 +247,11 @@ export default function AppLayout({ children }) {
             <nav className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-[#08080b]/95 backdrop-blur-2xl border-t border-white/10">
                 <div className="grid grid-cols-5 gap-1 px-2 py-2">
                    {[
-  BASE_NAV[0],
-  BASE_NAV[1],
-  BASE_NAV[2],
-  BASE_NAV[4],
-  BASE_NAV.find((item) => item.to === "/profile"),
+    BASE_NAV[0],
+    BASE_NAV[1],
+    BASE_NAV[2],
+    BASE_NAV[4],
+    BASE_NAV.find((item) => item.to === "/rewards"),
 ].map((item) => (
                         <NavLink
                             key={item.to}
