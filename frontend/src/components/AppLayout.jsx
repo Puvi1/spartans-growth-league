@@ -182,10 +182,6 @@ export default function AppLayout({ children }) {
         </div>
     )}
 </div>
-
-    </div>
-
-</div>
             </header>
 
             {/* Main */}
