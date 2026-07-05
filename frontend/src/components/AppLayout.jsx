@@ -150,7 +150,13 @@ export default function AppLayout({ children }) {
             {/* Mobile Bottom Nav */}
             <nav className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-[#08080b]/95 backdrop-blur-2xl border-t border-white/10">
                 <div className="grid grid-cols-5 gap-1 px-2 py-2">
-                    {BASE_NAV.slice(0, 5).map((item) => (
+                   {[
+  BASE_NAV[0],
+  BASE_NAV[1],
+  BASE_NAV[2],
+  BASE_NAV[4],
+  BASE_NAV.find((item) => item.to === "/profile"),
+].map((item) => (
                         <NavLink
                             key={item.to}
                             to={item.to}
