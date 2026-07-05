@@ -59,30 +59,52 @@ export default function Profile() {
         }
     }, [user]);
 
-    const saveProfile = async (e) => {
-        e.preventDefault();
-        try {
-            // Strip empty strings to null so backend sees them as intentional
-            const payload = {};
-            Object.entries(form).forEach(([k, v]) => {
-                if (v !== "" && v !== null && v !== undefined && k !== "team_id") payload[k] = v;
-            });
-            const { data } = await api.patch("/profile", payload);
-            // Team change (separate endpoint)
-            if (form.team_id && form.team_id !== user.team_id) {
-                await api.post(`/profile/join-team?team_id=${form.team_id}`);
-            }
-            if (data.xp) {
-                fireBigConfetti();
-                toast.success("Profile complete! +50 XP");
-            } else {
-                toast.success("Profile updated");
-            }
-            setEditing(false);
-            await refreshUser();
-            await loadCompletion();
-        } catch (err) { toast.error(err.response?.data?.detail || "Failed"); }
-    };
+   const saveProfile = async (e) => {
+    e.preventDefault();
+
+    const requiredFields = [
+        ["name", "Full Name"],
+        ["dob", "Date of Birth"],
+        ["gender", "Gender"],
+        ["marital_status", "Marital Status"],
+        ["city", "City"],
+        ["state", "State"],
+        ["club_type", "Club Type"],
+    ];
+
+    const missing = requiredFields.filter(([key]) => !form[key]?.trim());
+
+    if (missing.length > 0) {
+        toast.error(`Please fill: ${missing.map(([, label]) => label).join(", ")}`);
+        return;
+    }
+
+    try {
+        const payload = {};
+        Object.entries(form).forEach(([k, v]) => {
+            if (v !== "" && v !== null && v !== undefined && k !== "team_id") payload[k] = v;
+        });
+
+        const { data } = await api.patch("/profile", payload);
+
+        if (form.team_id && form.team_id !== user.team_id) {
+            await api.post(`/profile/join-team?team_id=${form.team_id}`);
+        }
+
+        if (data.xp) {
+            fireBigConfetti();
+            toast.success("Profile complete! +50 XP");
+        } else {
+            toast.success("Profile updated");
+        }
+
+        setEditing(false);
+        await refreshUser();
+        await loadCompletion();
+    } catch (err) {
+        toast.error(err.response?.data?.detail || "Please check your details and try again");
+    }
+};
 
     if (!user || !stats) return <div className="text-zinc-500 text-sm">Loading...</div>;
 
