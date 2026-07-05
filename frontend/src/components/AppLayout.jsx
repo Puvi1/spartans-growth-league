@@ -134,52 +134,52 @@ export default function AppLayout({ children }) {
         </div>
 
 
-        {/* Right */}
+{/* Right */}
 <div className="flex items-center gap-2 shrink-0">
+
+    <div className="chip-gold">
+        <ShieldStar size={12} weight="fill" />
+        LVL {user?.level || 1}
+    </div>
+
     <NotificationBell />
 
     <div className="relative">
-            <div className="chip-gold">
-                <ShieldStar size={12} weight="fill" />
-                LVL {user?.level || 1}
-            </div>
+        <button
+            onClick={() => setProfileMenuOpen(!profileMenuOpen)}
+            className="flex items-center gap-2 px-2 py-1 rounded-xl hover:bg-white/5"
+        >
+            <Avatar user={user} size={32} />
 
-            <NotificationBell />
+            <span className="text-xs font-semibold max-w-[70px] truncate">
+                {user?.name?.split(" ")[0]}
+            </span>
+        </button>
 
-            <div className="relative">
+        {profileMenuOpen && (
+            <div className="absolute right-0 mt-2 w-44 rounded-xl bg-[#111] border border-white/10 shadow-2xl z-50">
                 <button
-                    onClick={() => setProfileMenuOpen(!profileMenuOpen)}
-                    className="flex items-center gap-2 px-2 py-1 rounded-xl hover:bg-white/5"
+                    onClick={() => {
+                        navigate("/profile");
+                        setProfileMenuOpen(false);
+                    }}
+                    className="w-full text-left px-4 py-3 hover:bg-white/5"
                 >
-                    <Avatar user={user} size={32} />
-                    <span className="text-xs font-semibold max-w-[70px] truncate">
-    {user?.name?.split(" ")[0]}
-</span>
+                    👤 Profile
                 </button>
 
-                {profileMenuOpen && (
-                    <div className="absolute right-0 mt-2 w-44 rounded-xl bg-[#111] border border-white/10 shadow-2xl z-50">
-                        <button
-                            onClick={() => {
-                                navigate("/profile");
-                                setProfileMenuOpen(false);
-                            }}
-                            className="w-full text-left px-4 py-3 hover:bg-white/5"
-                        >
-                            👤 Profile
-                        </button>
-
-                        <button
-                            onClick={handleLogout}
-                            className="w-full text-left px-4 py-3 text-red-400 hover:bg-red-500/10"
-                        >
-                            🚪 Logout
-                        </button>
-                    </div>
-                )}
+                <button
+                    onClick={handleLogout}
+                    className="w-full text-left px-4 py-3 text-red-400 hover:bg-red-500/10"
+                >
+                    🚪 Logout
+                </button>
             </div>
-        </div>
+        )}
     </div>
+
+</div>
+</div>
 </header>
 
             {/* Main */}
