@@ -133,8 +133,12 @@ export default function AppLayout({ children }) {
             </Link>
         </div>
 
-        {/* Right Side */}
-        <div className="flex items-center gap-2">
+
+        {/* Right */}
+<div className="flex items-center gap-2 shrink-0">
+    <NotificationBell />
+
+    <div className="relative">
             <div className="chip-gold">
                 <ShieldStar size={12} weight="fill" />
                 LVL {user?.level || 1}
