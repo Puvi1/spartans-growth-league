@@ -112,77 +112,68 @@ export default function AppLayout({ children }) {
                 </div>
             </aside>
 
-            {/* Mobile Top Bar */}
-            <header className="lg:hidden sticky top-0 z-30 bg-[#08080b]/90 backdrop-blur-xl border-b border-white/5">
-                <div className="flex items-center justify-between px-4 py-3">
-                   
+           {/* Mobile Top Bar */}
+<header className="lg:hidden sticky top-0 z-30 bg-[#08080b]/90 backdrop-blur-xl border-b border-white/5">
+    <div className="flex items-center justify-between px-4 py-3">
 
-    {/* Left Side */}
-    <div className="flex items-center gap-2">
+        {/* Left Side */}
+        <div className="flex items-center gap-2">
+            <button
+                onClick={() => setMobileMenuOpen(true)}
+                className="p-2 rounded-lg text-zinc-300 hover:text-yellow-400 hover:bg-white/5"
+            >
+                <List size={22} />
+            </button>
 
-        <button
-            onClick={() => setMobileMenuOpen(true)}
-            className="p-2 rounded-lg text-zinc-300 hover:text-yellow-400 hover:bg-white/5"
-        >
-            <List size={22} />
-        </button>
+            <Link to="/" className="flex items-center gap-2" data-testid="brand-logo-mobile">
+                <div className="w-9 h-9 rounded-lg bg-yellow-500 text-black grid place-items-center shadow-[0_0_15px_rgba(234,179,8,0.5)]">
+                    <Sword size={18} weight="fill" />
+                </div>
+                <div className="font-display font-black text-sm">SPARTANS</div>
+            </Link>
+        </div>
 
-        <Link to="/" className="flex items-center gap-2" data-testid="brand-logo-mobile">
-            <div className="w-9 h-9 rounded-lg bg-yellow-500 text-black grid place-items-center shadow-[0_0_15px_rgba(234,179,8,0.5)]">
-                <Sword size={18} weight="fill" />
+        {/* Right Side */}
+        <div className="flex items-center gap-2">
+            <div className="chip-gold">
+                <ShieldStar size={12} weight="fill" />
+                LVL {user?.level || 1}
             </div>
 
-            <div className="font-display font-black text-sm">
-                SPARTANS
-            </div>
-        </Link>
+            <NotificationBell />
 
+            <div className="relative">
+                <button
+                    onClick={() => setProfileMenuOpen(!profileMenuOpen)}
+                    className="flex items-center gap-2 px-2 py-1 rounded-xl hover:bg-white/5"
+                >
+                    <Avatar user={user} size={32} />
+                </button>
+
+                {profileMenuOpen && (
+                    <div className="absolute right-0 mt-2 w-44 rounded-xl bg-[#111] border border-white/10 shadow-2xl z-50">
+                        <button
+                            onClick={() => {
+                                navigate("/profile");
+                                setProfileMenuOpen(false);
+                            }}
+                            className="w-full text-left px-4 py-3 hover:bg-white/5"
+                        >
+                            👤 Profile
+                        </button>
+
+                        <button
+                            onClick={handleLogout}
+                            className="w-full text-left px-4 py-3 text-red-400 hover:bg-red-500/10"
+                        >
+                            🚪 Logout
+                        </button>
+                    </div>
+                )}
+            </div>
+        </div>
     </div>
-
-    {/* Right Side */}
-    <div className="flex items-center gap-2">
-
-        <div className="chip-gold">
-            <ShieldStar size={12} weight="fill" />
-            LVL {user?.level || 1}
-        </div>
-
-        <NotificationBell />
-
-       <div className="relative">
-    <button
-        onClick={() => setProfileMenuOpen(!profileMenuOpen)}
-        className="flex items-center gap-2 px-2 py-1 rounded-xl hover:bg-white/5"
-    >
-        <Avatar user={user} size={32} />
-
-        <span className="hidden sm:block text-sm font-semibold">
-            {user?.name}
-        </span>
-    </button>
-
-    {profileMenuOpen && (
-        <div className="absolute right-0 mt-2 w-44 rounded-xl bg-[#111] border border-white/10 shadow-2xl z-50">
-            <button
-                onClick={() => {
-                    navigate("/profile");
-                    setProfileMenuOpen(false);
-                }}
-                className="w-full text-left px-4 py-3 hover:bg-white/5"
-            >
-                👤 Profile
-            </button>
-
-            <button
-                onClick={handleLogout}
-                className="w-full text-left px-4 py-3 text-red-400 hover:bg-red-500/10"
-            >
-                🚪 Logout
-            </button>
-        </div>
-    )}
-</div>
-            </header>
+</header>
 
             {/* Main */}
             <motion.main
