@@ -1742,7 +1742,16 @@ async def week_attendance(request: Request, week_of: Optional[str] = None):
     anchor = date.fromisoformat(week_of) if week_of else date.today()
     today = date.today()
     week_dates = _dates_for_week(anchor)
-    events = await db.weekly_events.find({"active": True}, {"_id": 0}).sort("weekday", 1).to_list(100)
+    event_filter = {"active": True}
+
+# Hide season attendance for Decider users
+if user.get("club_type") == "decider" and user.get("role") != "super_admin":
+    event_filter["is_believer"] = False
+
+events = await db.weekly_events.find(
+    event_filter,
+    {"_id": 0}
+).sort("weekday", 0).to_list(100)
     is_admin = user["role"] == "super_admin"
     occurrences = []
     for e in events:
@@ -3863,7 +3872,7 @@ async def seed_admin_and_indexes():
     we_count = await db.weekly_events.count_documents({})
     if we_count == 0:
         await db.weekly_events.insert_many([
-            {"event_id": str(uuid.uuid4()), "name": "Believer Season Meeting", "weekday": 1,
+            {"event_id": str(uuid.uuid4()), "name": "Believer Season Meeting", "weekday": 0,
              "is_believer": True, "active": True,
              "created_at": _iso(datetime.now(timezone.utc))},
             {"event_id": str(uuid.uuid4()), "name": "MCM (Meta Champion Meet)", "weekday": 3,
