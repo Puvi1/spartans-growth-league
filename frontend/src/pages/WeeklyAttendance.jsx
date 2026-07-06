@@ -25,7 +25,7 @@ export default function WeeklyAttendance() {
 
     const [sessionForm, setSessionForm] = useState({
         name: "",
-       clubs:[]
+       clubs:[],
         weekday: 0,
         repeat_type: "weekly",
         open_time: "08:00",
