@@ -233,7 +233,7 @@ class MissionUpdate(BaseModel):
 # --- Weekly Attendance / Seasons / Tasks models ---
 class WeeklyEventIn(BaseModel):
     name: str
-    club_type: Literal["converter", "believer", "builder", "decider", "all"] = "converter"
+    clubs: List[Literal["converter", "believer", "builder", "decider"]] = []
     weekday: int = Field(ge=0, le=6)
     repeat_type: Literal["weekly", "once"] = "weekly"
     open_time: str = "08:00"
@@ -241,17 +241,15 @@ class WeeklyEventIn(BaseModel):
     active: bool = True
     completed: bool = False
 
-
 class WeeklyEventUpdate(BaseModel):
     name: Optional[str] = None
-    club_type: Optional[Literal["converter", "believer", "builder", "decider", "all"]] = None
+    clubs: Optional[List[Literal["converter", "believer", "builder", "decider"]]] = None
     weekday: Optional[int] = Field(default=None, ge=0, le=6)
     repeat_type: Optional[Literal["weekly", "once"]] = None
     open_time: Optional[str] = None
     lock_time: Optional[str] = None
     active: Optional[bool] = None
     completed: Optional[bool] = None
-
 
 class EventAttendanceMark(BaseModel):
     event_id: str
@@ -1709,17 +1707,19 @@ async def create_weekly_event(payload: WeeklyEventIn, request: Request):
     user = await get_current_user(request, db)
     require_role(user, ["super_admin"])
 
+    if not payload.clubs:
+        raise HTTPException(status_code=400, detail="Select at least one club")
+
     doc = payload.model_dump()
     doc.update({
         "event_id": str(uuid.uuid4()),
-        "is_believer": payload.club_type == "believer",
+        "is_believer": "believer" in payload.clubs,
         "created_at": _iso(datetime.now(timezone.utc)),
     })
 
     await db.weekly_events.insert_one(doc)
     return _clean(doc)
-
-
+    
 @api.delete("/weekly-events/{event_id}")
 async def delete_weekly_event(event_id: str, request: Request):
     user = await get_current_user(request, db)
@@ -1778,11 +1778,10 @@ event_filter = {"active": True, "completed": {"$ne": True}}
 if not is_admin:
     user_club = str(user.get("club_type", "")).lower()
     event_filter["$or"] = [
-        {"club_type": user_club},
-        {"club_type": "all"},
-        {"club_type": {"$exists": False}},
+        {"clubs": {"$in": [user_club]}},
+        {"clubs": {"$exists": False}},
     ]
-
+    
     if user_club == "decider":
         event_filter["is_believer"] = False
 
