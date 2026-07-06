@@ -25,7 +25,7 @@ export default function WeeklyAttendance() {
 
     const [sessionForm, setSessionForm] = useState({
         name: "",
-        club_type: "converter",
+       clubs:[]
         weekday: 0,
         repeat_type: "weekly",
         open_time: "08:00",
@@ -85,7 +85,7 @@ export default function WeeklyAttendance() {
         try {
             await api.post("/weekly-events", {
                 name: sessionForm.name,
-                club_type: sessionForm.club_type,
+              clubs: sessionForm.clubs,
                 weekday: Number(sessionForm.weekday),
                 repeat_type: sessionForm.repeat_type,
                 open_time: sessionForm.open_time,
@@ -97,7 +97,7 @@ export default function WeeklyAttendance() {
 
             setSessionForm({
                 name: "",
-                club_type: "converter",
+                clubs:[]
                 weekday: 0,
                 repeat_type: "weekly",
                 open_time: "08:00",
@@ -109,6 +109,17 @@ export default function WeeklyAttendance() {
             toast.error(err.response?.data?.detail || "Failed to create session");
         }
     };
+const deleteSession = async (eventId) => {
+    if (!window.confirm("Delete this attendance session?")) return;
+
+    try {
+        await api.delete(`/weekly-events/${eventId}`);
+        toast.success("Attendance session deleted");
+        await load(weekOf);
+    } catch (err) {
+        toast.error(err.response?.data?.detail || "Unable to delete");
+    }
+};
 
     if (!data) return <div className="text-zinc-500 text-sm">Loading week...</div>;
 
@@ -147,14 +158,63 @@ export default function WeeklyAttendance() {
                         placeholder="Session name"
                         className="w-full bg-[#111] text-white border border-white/10 rounded-xl px-4 py-3 text-sm"
                     />
+<div className="space-y-3">
 
-                    <select value={sessionForm.club_type} onChange={(e) => setSessionForm({ ...sessionForm, club_type: e.target.value })} className="w-full bg-[#111] text-white border border-white/10 rounded-xl px-4 py-3 text-sm">
-                        <option value="converter">Converter</option>
-                        <option value="believer">Believer</option>
-                        <option value="builder">Builder</option>
-                        <option value="decider">Decider</option>
-                        <option value="all">All Clubs</option>
-                    </select>
+    <label className="text-sm font-semibold text-white">
+        Show Attendance For
+    </label>
+
+    <div className="grid grid-cols-2 gap-3">
+
+        {["converter","believer","builder","decider"].map((club)=>{
+
+            const selected=sessionForm.clubs.includes(club);
+
+            return(
+
+                <button
+                    key={club}
+                    type="button"
+                    onClick={()=>{
+
+                        if(selected){
+
+                            setSessionForm({
+                                ...sessionForm,
+                                clubs:sessionForm.clubs.filter(c=>c!==club)
+                            });
+
+                        }else{
+
+                            setSessionForm({
+                                ...sessionForm,
+                                clubs:[...sessionForm.clubs,club]
+                            });
+
+                        }
+
+                    }}
+
+                    className={`rounded-xl border p-3 transition-all
+
+                    ${
+                        selected
+                        ? "bg-yellow-500 text-black border-yellow-500"
+                        : "bg-[#111] border-white/10 text-white hover:border-yellow-500"
+                    }`}
+                >
+
+                    {club.charAt(0).toUpperCase()+club.slice(1)}
+
+                </button>
+
+            );
+
+        })}
+
+    </div>
+
+</div>
 
                     <select value={sessionForm.weekday} onChange={(e) => setSessionForm({ ...sessionForm, weekday: e.target.value })} className="w-full bg-[#111] text-white border border-white/10 rounded-xl px-4 py-3 text-sm">
                         <option value={0}>Monday</option>
@@ -202,11 +262,13 @@ export default function WeeklyAttendance() {
 
                         {data.occurrences.map((occ) => (
                             <EventCard
-                                key={occ.event_id + occ.event_date}
-                                occ={occ}
-                                busy={busy === occ.event_id + occ.event_date}
-                                onMark={(s) => markSelf(occ, s)}
-                            />
+    key={occ.event_id + occ.event_date}
+    occ={occ}
+    busy={busy === occ.event_id + occ.event_date}
+    onMark={(s) => markSelf(occ, s)}
+    onDelete={() => deleteSession(occ.event_id)}
+    isAdmin={user?.role === "super_admin"}
+/>
                         ))}
                     </div>
 
@@ -286,7 +348,7 @@ function TeamGrid({ data, onMark, busyKey }) {
     );
 }
 
-function EventCard({ occ, busy, onMark }) {
+function EventCard({ occ, busy, onMark, onDelete, isAdmin }) {
     const active = STATUSES.find((s) => s.key === occ.status);
     const bg = active?.key === "present" ? "border-emerald-500/40 bg-emerald-500/5" :
         active?.key === "absent" ? "border-red-500/40 bg-red-500/5" :
@@ -330,6 +392,14 @@ function EventCard({ occ, busy, onMark }) {
                     );
                 })}
             </div>
+            {isAdmin && (
+    <button
+        onClick={onDelete}
+        className="mt-4 w-full bg-red-600 hover:bg-red-700 text-white rounded-xl py-2 text-sm font-bold"
+    >
+        🗑 Delete Session
+    </button>
+)}
         </motion.div>
     );
 }
