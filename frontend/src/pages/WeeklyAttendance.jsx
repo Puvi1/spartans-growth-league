@@ -81,6 +81,10 @@ export default function WeeklyAttendance() {
             toast.error("Session name is required");
             return;
         }
+        if (sessionForm.clubs.length === 0) {
+    toast.error("Select at least one club");
+    return;
+}
 
         try {
             await api.post("/weekly-events", {
