@@ -1753,13 +1753,6 @@ async def complete_weekly_event(event_id: str, request: Request):
 
 @api.get("/event-attendance/week")
 async def week_attendance(request: Request, week_of: Optional[str] = None):
-    """Returns attendance events.
-
-    - Default: shows upcoming 30 days.
-    - Future meetings are visible but locked.
-    - Attendance can be marked only on meeting day.
-    - Decider users will not see believer/season attendance.
-    """
     user = await get_current_user(request, db)
 
     today = date.today()
@@ -1773,15 +1766,19 @@ async def week_attendance(request: Request, week_of: Optional[str] = None):
     else:
         period_start = today
         period_end = today + timedelta(days=30)
-event_filter = {"active": True, "completed": {"$ne": True}}
 
-if not is_admin:
-    user_club = str(user.get("club_type", "")).lower()
-    event_filter["clubs"] = {"$in": [user_club]}
-    
-    
-    if user_club == "decider":
-        event_filter["is_believer"] = False
+    event_filter = {"active": True, "completed": {"$ne": True}}
+
+    if not is_admin:
+        user_club = str(user.get("club_type", "")).lower()
+
+        event_filter["$or"] = [
+            {"clubs": {"$in": [user_club]}},
+            {"club_type": user_club},
+        ]
+
+        if user_club == "decider":
+            event_filter["is_believer"] = False
 
     events = await db.weekly_events.find(
         event_filter,
@@ -1818,11 +1815,12 @@ if not is_admin:
                 "weekday": e["weekday"],
                 "weekday_name": _weekday_name(e["weekday"]),
                 "is_believer": e.get("is_believer", False),
-               "clubs": e.get("clubs", []),
-"repeat_type": e.get("repeat_type", "weekly"),
-"open_time": e.get("open_time", "06:00"),
-"lock_time": e.get("lock_time", "22:00"),
-"completed": e.get("completed", False),
+                "clubs": e.get("clubs", []),
+                "club_type": e.get("club_type"),
+                "repeat_type": e.get("repeat_type", "weekly"),
+                "open_time": e.get("open_time", "06:00"),
+                "lock_time": e.get("lock_time", "22:00"),
+                "completed": e.get("completed", False),
                 "event_date": occ_date_str,
                 "status": mark["status"] if mark else None,
                 "locked": True if occ_date > today else _is_locked(occ_date_str),
@@ -1838,7 +1836,6 @@ if not is_admin:
         "week_end": period_end.isoformat(),
         "occurrences": occurrences,
     }
-
 @api.post("/event-attendance/mark")
 async def mark_attendance(payload: EventAttendanceMark, request: Request):
     user = await get_current_user(request, db)
